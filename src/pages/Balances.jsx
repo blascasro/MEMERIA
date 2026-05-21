@@ -3,10 +3,18 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Bar, Legend,
 } from 'recharts'
-import {
-  useSheetData, findColKey, fmt, fmtPct,
-  getMonths, filterByMonth,
-} from '../hooks/useSheetData'
+import { useSheetData, num, fmt, fmtPct, fmtPctAuto } from '../hooks/useSheetData'
+
+// ── Sheet row indices ──────────────────────────────────────────────────────────
+//
+// RESERVAS  — row 0 is the header: col 0 = label, col 1+ = month names
+// Stock copia rows (col 0 = label, col 1+ = monthly values):
+//   0 Stock | 1 Superavit/deficit | 2 Interanual | 3 S/D diario | 4 Fin | 5 Dias asegurados
+// IPG copia rows (col 0 = label, col 1+ = monthly values):
+//   0 TOTAL DE LIKES | 1 PROMEDIO DE TANDA | 2 dias registrados | 3 Maximo | 4 Minimo
+// APORTES — col 0 = name, col 1+ = memes by month
+//   Last 9 rows = totals: SOCIOS, TOTAL, Incumplidores, Evasion fiscal,
+//                          Evasion fiscal%, IHH, Estructura, C3, C5
 
 const TOOLTIP_STYLE = {
   background: 'var(--card)',
@@ -18,162 +26,86 @@ const TOOLTIP_STYLE = {
 }
 
 function Loading() {
-  return (
-    <div className="state-box">
-      <div className="spinner" />
-      <span>Cargando datos…</span>
-    </div>
-  )
+  return <div className="state-box"><div className="spinner" /><span>Cargando datos…</span></div>
 }
 
-function ErrorBox({ msg }) {
-  return (
-    <div className="state-box" style={{ color: 'var(--red)' }}>
-      Error al cargar: {msg}
-    </div>
-  )
-}
-
-function prevMonthKey(mk) {
-  if (!mk) return null
-  const [y, m] = mk.split('-').map(Number)
-  const d = new Date(y, m - 2, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-function yearAgoKey(mk) {
-  if (!mk) return null
-  const [y, m] = mk.split('-').map(Number)
-  return `${y - 1}-${String(m).padStart(2, '0')}`
-}
-
-function lastValue(rows, key) {
-  if (!key || !rows.length) return null
-  const v = rows[rows.length - 1][key]
-  return v != null ? Number(v) : null
+// Safe getter for APORTES last-N rows
+function totalsRow(matrix, fromEnd) {
+  const idx = matrix.length + fromEnd   // fromEnd is negative
+  return idx >= 0 ? (matrix[idx] ?? []) : []
 }
 
 export default function Balances() {
   const [tab, setTab] = useState('anual')
-  const [selectedMonth, setSelectedMonth] = useState('')
+  const [selectedLabel, setSelectedLabel] = useState(null)
 
-  const stock   = useSheetData('Stock copia')
-  const ipg     = useSheetData('IPG copia')
-  const aportes = useSheetData('APORTES')
+  const reservas = useSheetData('RESERVAS')
+  const stock    = useSheetData('Stock copia')
+  const ipg      = useSheetData('IPG copia')
+  const aportes  = useSheetData('APORTES')
 
-  // ── Column detection ──────────────────────────────
-  const stockDateKey  = findColKey(stock.cols,   'fecha', 'date', 'mes', 'periodo', 'año', 'month')
-  const stockValueKey = findColKey(stock.cols,   'stock', 'cantidad', 'valor', 'total', 'saldo', 'reserva')
+  const loading = reservas.loading || stock.loading || ipg.loading || aportes.loading
+  const error   = reservas.error   || stock.error   || ipg.error   || aportes.error
 
-  const ipgDateKey  = findColKey(ipg.cols, 'fecha', 'date', 'mes', 'tanda', 'periodo', 'month')
-  const ipgTandaKey = findColKey(ipg.cols, 'tanda', 'n°', 'num', 'nro', 'batch', 'ronda')
-  const ipgLikesKey = findColKey(ipg.cols, 'likes', 'like', 'reactions', 'total', 'ipg', 'valor')
-
-  const aporteMesKey  = findColKey(aportes.cols, 'mes', 'fecha', 'month', 'periodo', 'date')
-  const aporteNomKey  = findColKey(aportes.cols, 'nombre', 'socio', 'name', 'member', 'usuario')
-  const aporteCantKey = findColKey(aportes.cols, 'memes', 'aporte', 'cantidad', 'total', 'cant', 'contribucion')
-
-  const loading = stock.loading || ipg.loading || aportes.loading
-  const error   = stock.error   || ipg.error   || aportes.error
-
-  // ── Annual chart data ─────────────────────────────
-  const stockChartData = useMemo(() =>
-    stock.data
-      .filter(r => r[stockDateKey] && r[stockValueKey] != null)
-      .map(r => {
-        const d = r[stockDateKey] instanceof Date ? r[stockDateKey] : new Date(r[stockDateKey])
-        return {
-          label: d.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }),
-          date: d,
-          stock: Number(r[stockValueKey]) || 0,
-        }
-      })
-      .sort((a, b) => a.date - b.date),
-    [stock.data, stockDateKey, stockValueKey]
+  // ── Month labels from RESERVAS row 0, cols 1+ ─────────────────────────────
+  const monthLabels = useMemo(
+    () => (reservas.matrix[0] ?? []).slice(1).map(v => (v != null ? String(v) : null)).filter(Boolean),
+    [reservas.matrix]
   )
 
-  const ipgGlobalAvg = useMemo(() => {
-    if (!ipg.data.length || !ipgLikesKey) return 0
-    const total = ipg.data.reduce((s, r) => s + (Number(r[ipgLikesKey]) || 0), 0)
-    return total / ipg.data.length
-  }, [ipg.data, ipgLikesKey])
+  const currentLabel = selectedLabel ?? monthLabels[monthLabels.length - 1] ?? null
+  const monthIdx     = currentLabel ? monthLabels.indexOf(currentLabel) : monthLabels.length - 1
+  // col index in every sheet: +1 because col 0 is the row-label column
+  const colIdx = monthIdx + 1
 
-  const ipgChartData = useMemo(() =>
-    ipg.data
-      .filter(r => ipgLikesKey && r[ipgLikesKey] != null)
-      .map((r, i) => {
-        const labelKey = ipgTandaKey || ipgDateKey
-        let label = labelKey ? r[labelKey] : `T${i + 1}`
-        if (label instanceof Date) {
-          label = label.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' })
-        }
-        return {
-          label: String(label ?? `T${i + 1}`),
-          likes: Number(r[ipgLikesKey]) || 0,
-          promedio: Math.round(ipgGlobalAvg),
-        }
-      }),
-    [ipg.data, ipgLikesKey, ipgTandaKey, ipgDateKey, ipgGlobalAvg]
+  // ── Annual chart data ──────────────────────────────────────────────────────
+  const stockRow      = stock.matrix[0] ?? []   // row 0 = Stock
+  const totalLikesRow = ipg.matrix[0]   ?? []   // row 0 = TOTAL DE LIKES
+  const promTandaRow  = ipg.matrix[1]   ?? []   // row 1 = PROMEDIO DE TANDA
+
+  const stockChartData = useMemo(
+    () => monthLabels.map((label, i) => ({ label, stock: num(stockRow[i + 1]) ?? 0 })),
+    [monthLabels, stockRow]
   )
 
-  // ── Month selector ────────────────────────────────
-  const allMonths = useMemo(() => {
-    const sm = getMonths(stock.data, stockDateKey)
-    return sm.length ? sm : getMonths(aportes.data, aporteMesKey)
-  }, [stock.data, stockDateKey, aportes.data, aporteMesKey])
+  const ipgChartData = useMemo(
+    () => monthLabels.map((label, i) => ({
+      label,
+      likes:    num(totalLikesRow[i + 1]) ?? 0,
+      promedio: num(promTandaRow[i + 1])  ?? 0,
+    })),
+    [monthLabels, totalLikesRow, promTandaRow]
+  )
 
-  const currentKey = selectedMonth || (allMonths.length ? allMonths[allMonths.length - 1].key : '')
+  // ── Monthly — Informe Stock ────────────────────────────────────────────────
+  const curStock  = num(stockRow[colIdx])
+  const prevStock = num(stockRow[colIdx - 1])
+  const diffMes   = curStock != null && prevStock != null ? curStock - prevStock : null
+  const interanual = num((stock.matrix[2] ?? [])[colIdx])   // row 2 = Interanual
+  const sdDiario   = num((stock.matrix[3] ?? [])[colIdx])   // row 3 = S/D diario
+  const diasAseg   = num((stock.matrix[5] ?? [])[colIdx])   // row 5 = Dias asegurados
 
-  // ── Monthly metrics — Stock ───────────────────────
-  const curStockRows  = filterByMonth(stock.data, stockDateKey, currentKey)
-  const prevStockRows = filterByMonth(stock.data, stockDateKey, prevMonthKey(currentKey))
-  const yoyStockRows  = filterByMonth(stock.data, stockDateKey, yearAgoKey(currentKey))
+  // ── Monthly — Informe IPG ──────────────────────────────────────────────────
+  const totalLikes = num(totalLikesRow[colIdx])
+  const promTanda  = num(promTandaRow[colIdx])
+  const maxLikes   = num((ipg.matrix[3] ?? [])[colIdx])     // row 3 = Maximo
+  const diasIPG    = num((ipg.matrix[2] ?? [])[colIdx])     // row 2 = dias registrados
 
-  const currentStock = lastValue(curStockRows,  stockValueKey)
-  const prevStock    = lastValue(prevStockRows, stockValueKey)
-  const yoyStock     = lastValue(yoyStockRows,  stockValueKey)
-
-  const diffMes  = currentStock != null && prevStock != null ? currentStock - prevStock : null
-  const diffAnio = currentStock != null && yoyStock  != null ? currentStock - yoyStock  : null
-
-  const [cy, cm] = currentKey ? currentKey.split('-').map(Number) : [0, 0]
-  const daysInMonth = cm ? new Date(cy, cm, 0).getDate() : 30
-  const dailyRate   = ipgGlobalAvg > 0 ? ipgGlobalAvg / 30 : null
-  const diasAsegurados = currentStock != null && dailyRate
-    ? Math.floor(currentStock / dailyRate)
-    : null
-  const superavit = currentStock != null && dailyRate != null
-    ? currentStock - daysInMonth * dailyRate
-    : null
-
-  // ── Monthly metrics — IPG ─────────────────────────
-  const curIPGRows = ipgDateKey
-    ? filterByMonth(ipg.data, ipgDateKey, currentKey)
-    : ipg.data
-
-  const totalLikes  = curIPGRows.reduce((s, r) => s + (Number(r[ipgLikesKey]) || 0), 0)
-  const avgPorTanda = curIPGRows.length ? totalLikes / curIPGRows.length : 0
-  const maxLikes    = curIPGRows.length
-    ? Math.max(...curIPGRows.map(r => Number(r[ipgLikesKey]) || 0))
-    : 0
-
-  // ── Monthly metrics — Presupuestario ─────────────
-  const curAportes   = aporteMesKey ? filterByMonth(aportes.data, aporteMesKey, currentKey) : aportes.data
-  const socios       = curAportes.filter(r => aporteNomKey && r[aporteNomKey])
-  const numSocios    = socios.length
-  const totalAport   = socios.reduce((s, r) => s + (Number(r[aporteCantKey]) || 0), 0)
-  const aporteSoc    = numSocios ? Math.round(totalAport / numSocios) : 0
-  const incumplidores = socios.filter(r => (Number(r[aporteCantKey]) || 0) === 0).length
-  const evadido      = incumplidores * aporteSoc
-  const pctEvasion   = numSocios ? (incumplidores / numSocios) * 100 : 0
-
-  const sortedAp = [...socios].sort((a, b) => (Number(b[aporteCantKey]) || 0) - (Number(a[aporteCantKey]) || 0))
-  const top5     = sortedAp.slice(0, 5).reduce((s, r) => s + (Number(r[aporteCantKey]) || 0), 0)
-  const c5       = totalAport ? (top5 / totalAport) * 100 : 0
-  const estructura = c5 >= 60 ? 'Oligopólica' : c5 >= 40 ? 'Concentrada' : 'Competitiva'
+  // ── Monthly — Informe Presupuestario ──────────────────────────────────────
+  // Last 9 rows of APORTES (by position from end, negative index notation)
+  const m         = aportes.matrix
+  const totSocios = num(totalsRow(m, -9)[colIdx])   // SOCIOS
+  const totTotal  = num(totalsRow(m, -8)[colIdx])   // TOTAL
+  const totIncump = num(totalsRow(m, -7)[colIdx])   // Incumplidores
+  const totEvFis  = num(totalsRow(m, -6)[colIdx])   // Evasion fiscal (memes)
+  const totEvPct  = num(totalsRow(m, -5)[colIdx])   // Evasion fiscal%
+  const totEstr   = totalsRow(m, -3)[colIdx]         // Estructura (string)
+  const totC3     = num(totalsRow(m, -2)[colIdx])   // C3
+  const totC5     = num(totalsRow(m, -1)[colIdx])   // C5
+  const aporteSoc = totSocios && totTotal ? Math.round(totTotal / totSocios) : null
 
   if (loading) return <div className="container"><Loading /></div>
-  if (error)   return <div className="container"><ErrorBox msg={error} /></div>
+  if (error)   return <div className="container"><div className="state-box" style={{ color: 'var(--red)' }}>Error: {error}</div></div>
 
   return (
     <div className="container">
@@ -195,63 +127,43 @@ export default function Balances() {
         <div>
           {/* Stock histórico */}
           <div className="card mb-24">
-            <div className="section-header">
-              <span className="section-title">Stock histórico</span>
-            </div>
-            {stockChartData.length > 0 ? (
+            <div className="section-header"><span className="section-title">Stock histórico</span></div>
+            {stockChartData.some(d => d.stock > 0) ? (
               <div style={{ height: 260 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={stockChartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                     <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                    <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} width={50} />
+                    <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} width={52} />
                     <Tooltip contentStyle={TOOLTIP_STYLE} />
                     <Line
-                      type="monotone"
-                      dataKey="stock"
-                      stroke="var(--accent)"
-                      strokeWidth={2}
-                      dot={false}
-                      activeDot={{ r: 4, fill: 'var(--accent)' }}
-                      name="Stock"
+                      type="monotone" dataKey="stock" stroke="var(--accent)"
+                      strokeWidth={2} dot={false} activeDot={{ r: 4 }} name="Stock"
                     />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="state-box" style={{ padding: '40px 0' }}>Sin datos de stock histórico</div>
+              <div className="state-box" style={{ padding: '40px 0' }}>Sin datos de stock</div>
             )}
           </div>
 
           {/* IPG histórico */}
           <div className="card">
-            <div className="section-header">
-              <span className="section-title">IPG histórico — Likes por tanda</span>
-            </div>
-            {ipgChartData.length > 0 ? (
+            <div className="section-header"><span className="section-title">IPG histórico — Likes por mes</span></div>
+            {ipgChartData.some(d => d.likes > 0) ? (
               <div style={{ height: 260 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={ipgChartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                     <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                    <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} width={50} />
+                    <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} width={52} />
                     <Tooltip contentStyle={TOOLTIP_STYLE} />
                     <Legend iconSize={10} wrapperStyle={{ fontSize: 12, color: 'var(--text-dim)' }} />
-                    <Bar
-                      dataKey="likes"
-                      fill="var(--accent)"
-                      opacity={0.72}
-                      name="Likes"
-                      radius={[2, 2, 0, 0]}
-                    />
+                    <Bar dataKey="likes" fill="var(--accent)" opacity={0.72} name="Total likes" radius={[2, 2, 0, 0]} />
                     <Line
-                      type="monotone"
-                      dataKey="promedio"
-                      stroke="var(--orange)"
-                      strokeWidth={2}
-                      dot={false}
-                      strokeDasharray="5 3"
-                      name="Promedio"
+                      type="monotone" dataKey="promedio" stroke="var(--orange)"
+                      strokeWidth={2} dot={false} strokeDasharray="5 3" name="Prom. tanda"
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -269,14 +181,18 @@ export default function Balances() {
             <label style={{ fontSize: 13, color: 'var(--text-dim)' }}>Mes:</label>
             <select
               className="select"
-              value={currentKey}
-              onChange={e => setSelectedMonth(e.target.value)}
+              value={currentLabel ?? ''}
+              onChange={e => setSelectedLabel(e.target.value)}
             >
-              {allMonths.map(m => (
-                <option key={m.key} value={m.key}>{m.label}</option>
+              {monthLabels.map(label => (
+                <option key={label} value={label}>{label}</option>
               ))}
             </select>
           </div>
+
+          {monthLabels.length === 0 && (
+            <div className="state-box">No se encontraron meses en la hoja RESERVAS.</div>
+          )}
 
           <div className="report-grid">
             {/* Informe Stock */}
@@ -285,9 +201,7 @@ export default function Balances() {
               <div className="report-body">
                 <div className="report-row">
                   <span className="report-row-label">Stock actual</span>
-                  <span className="report-row-value accent">
-                    {currentStock != null ? fmt(currentStock) : '—'}
-                  </span>
+                  <span className="report-row-value accent">{curStock != null ? fmt(curStock) : '—'}</span>
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Diff. vs mes anterior</span>
@@ -297,21 +211,19 @@ export default function Balances() {
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Diff. interanual</span>
-                  <span className={`report-row-value ${diffAnio == null ? '' : diffAnio >= 0 ? 'green' : 'red'}`}>
-                    {diffAnio != null ? `${diffAnio >= 0 ? '+' : ''}${fmt(diffAnio)}` : '—'}
+                  <span className={`report-row-value ${interanual == null ? '' : interanual >= 0 ? 'green' : 'red'}`}>
+                    {interanual != null ? `${interanual >= 0 ? '+' : ''}${fmt(interanual)}` : '—'}
                   </span>
                 </div>
                 <div className="report-row">
-                  <span className="report-row-label">Superávit / Déficit diario</span>
-                  <span className={`report-row-value ${superavit == null ? '' : superavit >= 0 ? 'green' : 'red'}`}>
-                    {superavit != null ? `${superavit >= 0 ? '+' : ''}${fmt(superavit, 0)}` : '—'}
+                  <span className="report-row-label">S/D diario</span>
+                  <span className={`report-row-value ${sdDiario == null ? '' : sdDiario >= 0 ? 'green' : 'red'}`}>
+                    {sdDiario != null ? `${sdDiario >= 0 ? '+' : ''}${fmt(sdDiario, 1)}` : '—'}
                   </span>
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Días asegurados</span>
-                  <span className="report-row-value">
-                    {diasAsegurados != null ? `${fmt(diasAsegurados)} días` : '—'}
-                  </span>
+                  <span className="report-row-value">{diasAseg != null ? `${fmt(diasAseg)} días` : '—'}</span>
                 </div>
               </div>
             </div>
@@ -326,15 +238,15 @@ export default function Balances() {
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Promedio por tanda</span>
-                  <span className="report-row-value">{fmt(avgPorTanda, 1)}</span>
+                  <span className="report-row-value">{fmt(promTanda, 1)}</span>
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Máximo mensual</span>
                   <span className="report-row-value green">{fmt(maxLikes)}</span>
                 </div>
                 <div className="report-row">
-                  <span className="report-row-label">Tandas registradas</span>
-                  <span className="report-row-value">{curIPGRows.length}</span>
+                  <span className="report-row-label">Días registrados</span>
+                  <span className="report-row-value">{diasIPG != null ? fmt(diasIPG) : '—'}</span>
                 </div>
               </div>
             </div>
@@ -345,32 +257,36 @@ export default function Balances() {
               <div className="report-body">
                 <div className="report-row">
                   <span className="report-row-label">Aporte societario</span>
-                  <span className="report-row-value">{fmt(aporteSoc)} memes</span>
+                  <span className="report-row-value">{aporteSoc != null ? `${fmt(aporteSoc)} memes` : '—'}</span>
                 </div>
                 <div className="report-row">
-                  <span className="report-row-label">C5 (concentración top 5)</span>
-                  <span className="report-row-value">{fmtPct(c5)}</span>
+                  <span className="report-row-label">C5</span>
+                  <span className="report-row-value">{totC5 != null ? fmtPctAuto(totC5) : '—'}</span>
+                </div>
+                <div className="report-row">
+                  <span className="report-row-label">C3</span>
+                  <span className="report-row-value">{totC3 != null ? fmtPctAuto(totC3) : '—'}</span>
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Estructura de mercado</span>
-                  <span className="report-row-value">{estructura}</span>
+                  <span className="report-row-value">{totEstr != null ? String(totEstr) : '—'}</span>
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Incumplidores</span>
-                  <span className={`report-row-value ${incumplidores > 0 ? 'red' : 'green'}`}>
-                    {incumplidores} / {numSocios}
+                  <span className={`report-row-value ${(totIncump ?? 0) > 0 ? 'red' : 'green'}`}>
+                    {totIncump != null ? fmt(totIncump) : '—'}
                   </span>
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">Evasión fiscal</span>
-                  <span className={`report-row-value ${evadido > 0 ? 'red' : 'green'}`}>
-                    {fmt(evadido)} memes
+                  <span className={`report-row-value ${(totEvFis ?? 0) > 0 ? 'red' : 'green'}`}>
+                    {totEvFis != null ? `${fmt(totEvFis)} memes` : '—'}
                   </span>
                 </div>
                 <div className="report-row">
                   <span className="report-row-label">% Evasión</span>
-                  <span className={`report-row-value ${pctEvasion > 0 ? 'red' : 'green'}`}>
-                    {fmtPct(pctEvasion)}
+                  <span className={`report-row-value ${(totEvPct ?? 0) > 0 ? 'red' : 'green'}`}>
+                    {fmtPctAuto(totEvPct)}
                   </span>
                 </div>
               </div>

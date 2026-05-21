@@ -2,69 +2,61 @@ import { useState, useEffect } from 'react'
 
 const SHEET_ID = '1TjM_AeONimhZ2TsrueKT3g1RWUPnqikP7qLKVZMO8P4'
 
-function parseGvizDate(val) {
-  if (!val || typeof val !== 'string' || !val.startsWith('Date(')) return null
-  const parts = val.slice(5, -1).split(',').map(Number)
-  return new Date(parts[0], parts[1], parts[2] ?? 1)
+// Parse gviz date string "Date(y,m,d)" → Date object
+function parseGvizDate(v) {
+  if (typeof v !== 'string' || !v.startsWith('Date(')) return null
+  const p = v.slice(5, -1).split(',').map(Number)
+  return new Date(p[0], p[1], p[2] ?? 1)
 }
 
+// Strip JSONP wrapper and parse the inner JSON
 function parseGvizResponse(text) {
-  const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?\s*$/)
-  if (!match) throw new Error('Respuesta gviz inválida')
+  const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*?)\);?\s*$/)
+  if (!match) throw new Error('Formato gviz inválido')
 
-  let data
-  try {
-    data = JSON.parse(match[1])
-  } catch {
-    throw new Error('Error al parsear JSON de Google Sheets')
-  }
-
+  const data = JSON.parse(match[1])
   if (data.status !== 'ok') {
-    const msg =
-      data.errors?.[0]?.detailed_message ||
-      data.errors?.[0]?.message ||
-      'Error en la hoja'
-    throw new Error(msg)
+    throw new Error(data.errors?.[0]?.message || 'Error en la hoja')
   }
 
   const { cols, rows } = data.table
+  const numCols = cols.length
 
-  const parsed = (rows || [])
-    .filter(row => row?.c?.some(c => c?.v != null && c?.v !== ''))
-    .map(row => {
-      const obj = {}
-      cols.forEach((col, i) => {
-        const cell = row.c?.[i]
-        let val = cell?.v ?? null
-        if ((col.type === 'date' || col.type === 'datetime') && val != null) {
-          val = parseGvizDate(String(val))
-        }
-        const key = col.label || col.id || `col_${i}`
-        obj[key] = val
-      })
-      return obj
+  // colHeaders: raw label strings from gviz (often "" when labels are missing)
+  const colHeaders = cols.map(c => c.label ?? '')
+
+  // matrix[i][j] = parsed value at row i, col j
+  const matrix = (rows || []).map(row =>
+    Array.from({ length: numCols }, (_, j) => {
+      const cell = row?.c?.[j]
+      if (!cell || cell.v == null) return null
+      const colType = cols[j]?.type
+      if (colType === 'date' || colType === 'datetime') {
+        return parseGvizDate(String(cell.v))
+      }
+      return cell.v
     })
+  )
 
-  return {
-    data: parsed,
-    cols: cols.map(c => ({ ...c, key: c.label || c.id })),
-  }
+  return { matrix, colHeaders }
 }
 
+// ── Core hook ──────────────────────────────────────────────────────────────────
 export function useSheetData(sheetName) {
   const [state, setState] = useState({
-    data: [],
-    cols: [],
+    matrix: [],
+    colHeaders: [],
     loading: !!sheetName,
     error: null,
   })
 
   useEffect(() => {
     if (!sheetName) return
-
     setState(s => ({ ...s, loading: true, error: null }))
 
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`
+    const url =
+      `https://docs.google.com/spreadsheets/d/${SHEET_ID}` +
+      `/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`
 
     let cancelled = false
 
@@ -75,90 +67,55 @@ export function useSheetData(sheetName) {
       })
       .then(text => {
         if (cancelled) return
-        const { data, cols } = parseGvizResponse(text)
-        setState({ data, cols, loading: false, error: null })
+        const parsed = parseGvizResponse(text)
+        setState({ ...parsed, loading: false, error: null })
       })
       .catch(err => {
         if (cancelled) return
-        setState({ data: [], cols: [], loading: false, error: err.message })
+        setState({ matrix: [], colHeaders: [], loading: false, error: err.message })
       })
 
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [sheetName])
 
   return state
 }
 
-// Find a column key by trying candidate substrings (case-insensitive)
-export function findColKey(cols, ...patterns) {
-  for (const pat of patterns) {
-    const found = cols.find(c =>
-      c.key?.toLowerCase().includes(pat.toLowerCase())
-    )
-    if (found) return found.key
-  }
-  return null
+// ── Numeric coercion (returns null for invalid / missing) ──────────────────────
+export function num(v) {
+  if (v == null) return null
+  const n = Number(v)
+  return isNaN(n) ? null : n
 }
 
-// Median of a numeric array (ignores nulls/NaN)
+// ── Median (ignores nulls/NaN) ─────────────────────────────────────────────────
 export function median(arr) {
-  const sorted = arr.filter(v => v != null && !isNaN(v)).sort((a, b) => a - b)
-  if (!sorted.length) return 0
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  const s = arr.filter(v => v != null && !isNaN(v)).sort((a, b) => a - b)
+  if (!s.length) return 0
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
-// Format number in Argentine locale
+// ── Formatters ─────────────────────────────────────────────────────────────────
 export function fmt(n, decimals = 0) {
   if (n == null || isNaN(n)) return '—'
-  return n.toLocaleString('es-AR', {
+  return Number(n).toLocaleString('es-AR', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })
 }
 
-// Format percentage
 export function fmtPct(n, decimals = 1) {
   if (n == null || isNaN(n)) return '—'
-  return `${n.toLocaleString('es-AR', {
+  return `${Number(n).toLocaleString('es-AR', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })}%`
 }
 
-// Get unique sorted months from a dataset
-export function getMonths(data, dateKey) {
-  if (!dateKey) return []
-  const seen = new Set()
-  const months = []
-  for (const row of data) {
-    const raw = row[dateKey]
-    if (!raw) continue
-    const d = raw instanceof Date ? raw : new Date(raw)
-    if (isNaN(d)) continue
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    if (!seen.has(key)) {
-      seen.add(key)
-      months.push({
-        key,
-        label: d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
-        date: d,
-      })
-    }
-  }
-  return months.sort((a, b) => a.date - b.date)
-}
-
-// Filter rows matching a YYYY-MM key
-export function filterByMonth(data, dateKey, monthKey) {
-  if (!dateKey || !monthKey) return data
-  return data.filter(r => {
-    const raw = r[dateKey]
-    if (!raw) return false
-    const d = raw instanceof Date ? raw : new Date(raw)
-    if (isNaN(d)) return false
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === monthKey
-  })
+// pct stored as fraction (0.15) or whole (15) → always render as whole
+export function fmtPctAuto(n, decimals = 1) {
+  if (n == null || isNaN(n)) return '—'
+  const v = Math.abs(Number(n)) <= 1 ? Number(n) * 100 : Number(n)
+  return fmtPct(v, decimals)
 }
