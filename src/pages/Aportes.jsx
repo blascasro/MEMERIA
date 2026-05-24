@@ -2,14 +2,21 @@ import { useState, useMemo } from 'react'
 import { useSheetData, num, fmt, fmtPct, fmtPctAuto } from '../hooks/useSheetData'
 
 // ── APORTES matrix layout ─────────────────────────────────────────────────────
-// col 0        = nombre socio
-// col 1..n     = memes aportados por mes
-// last 9 rows  = totales (SOCIOS, TOTAL, Incumplidores, Evasion fiscal,
-//                Evasion fiscal%, IHH, Estructura, C3, C5)
+// col 0           = nombre socio
+// cols 1..N       = months, ALTERNATING: odd cols = memes, even cols = %
+//   month n (0-based): memesCol = 2n+1 ,  pctCol = 2n+2
 //
-// RESERVAS row 0 (col 1+) = month labels (shared time axis)
+// last 9 rows = totals (position from end):
+//   -9  SOCIOS          -6  Evasion fiscal
+//   -8  TOTAL           -5  Evasion fiscal%
+//   -7  Incumplidores   -4  IHH
+//                       -3  Estructura
+//                       -2  C3
+//                       -1  C5
+//
+// RESERVAS row 0 (col 1+) provides the month label strings.
 
-const N_TOTALS = 9  // number of totals rows at the end
+const N_TOTALS = 9
 
 function Loading() {
   return <div className="state-box"><div className="spinner" /><span>Cargando aportes…</span></div>
@@ -21,15 +28,13 @@ function safeRow(matrix, fromEnd) {
 }
 
 export default function Aportes() {
+  // ── All hooks first ───────────────────────────────────────────────────────
   const { matrix: aMatrix, loading: aLoading, error: aError } = useSheetData('APORTES')
   const { matrix: rMatrix, loading: rLoading, error: rError } = useSheetData('RESERVAS')
 
   const [selectedLabel, setSelectedLabel] = useState(null)
 
-  const loading = aLoading || rLoading
-  const error   = aError   || rError
-
-  // Month labels from RESERVAS row 0 (col 1+)
+  // Month labels from RESERVAS row 0, cols 1+
   const monthLabels = useMemo(
     () => (rMatrix[0] ?? []).slice(1).map(v => (v != null ? String(v) : null)).filter(Boolean),
     [rMatrix]
@@ -37,34 +42,41 @@ export default function Aportes() {
 
   const currentLabel = selectedLabel ?? monthLabels[monthLabels.length - 1] ?? null
   const monthIdx     = currentLabel ? monthLabels.indexOf(currentLabel) : monthLabels.length - 1
-  const colIdx       = monthIdx + 1   // +1 because col 0 is the name column
 
-  // Member rows = all except last N_TOTALS
+  // APORTES alternating column selectors for month n (0-based)
+  const memesCol = 2 * monthIdx + 1    // memes count
+  const pctCol   = 2 * monthIdx + 2    // pre-computed % of total
+
+  // Member rows = all except last N_TOTALS rows
   const memberRows = useMemo(
-    () => aMatrix.slice(0, Math.max(0, aMatrix.length - N_TOTALS))
+    () => aMatrix
+      .slice(0, Math.max(0, aMatrix.length - N_TOTALS))
       .filter(row => row[0] != null && String(row[0]).trim() !== ''),
     [aMatrix]
   )
 
-  // Sort members for selected month, descending
+  // Sort members for selected month, highest memes first
   const sorted = useMemo(
-    () => [...memberRows].sort((a, b) => (num(b[colIdx]) ?? 0) - (num(a[colIdx]) ?? 0)),
-    [memberRows, colIdx]
+    () => [...memberRows].sort((a, b) => (num(b[memesCol]) ?? 0) - (num(a[memesCol]) ?? 0)),
+    [memberRows, memesCol]
   )
 
-  const maxCant = num(sorted[0]?.[colIdx]) ?? 1
+  const maxCant = num(sorted[0]?.[memesCol]) ?? 1
 
-  // Pre-computed totals from sheet (last 9 rows, by position from end)
-  const totTotal   = num(safeRow(aMatrix, -8)[colIdx])   // TOTAL
-  const totSocios  = num(safeRow(aMatrix, -9)[colIdx])   // SOCIOS
-  const totIncump  = num(safeRow(aMatrix, -7)[colIdx])   // Incumplidores
-  const totEvFis   = num(safeRow(aMatrix, -6)[colIdx])   // Evasion fiscal (memes)
-  const totEvPct   = num(safeRow(aMatrix, -5)[colIdx])   // Evasion fiscal%
-  const totEstr    = safeRow(aMatrix, -3)[colIdx]         // Estructura (string)
-  const totC3      = num(safeRow(aMatrix, -2)[colIdx])   // C3
-  const totC5      = num(safeRow(aMatrix, -1)[colIdx])   // C5
-  const aporteSoc  = totSocios && totTotal ? Math.round(totTotal / totSocios) : null
+  // Pre-computed totals from sheet (last 9 rows)
+  const totTotal  = num(safeRow(aMatrix, -8)[memesCol])   // TOTAL memes
+  const totSocios = num(safeRow(aMatrix, -9)[memesCol])   // SOCIOS count
+  const totIncump = num(safeRow(aMatrix, -7)[memesCol])   // Incumplidores
+  const totEvFis  = num(safeRow(aMatrix, -6)[memesCol])   // Evasion fiscal (memes)
+  const totEvPct  = num(safeRow(aMatrix, -5)[memesCol])   // Evasion fiscal%
+  const totEstr   =     safeRow(aMatrix, -3)[memesCol]    // Estructura (string)
+  const totC5     = num(safeRow(aMatrix, -1)[memesCol])   // C5
+  const aporteSoc = totSocios && totTotal ? Math.round(totTotal / totSocios) : null
 
+  const loading = aLoading || rLoading
+  const error   = aError   || rError
+
+  // ── Early returns after all hooks ────────────────────────────────────────
   if (loading) return <div className="container"><Loading /></div>
   if (error)   return <div className="container"><div className="state-box" style={{ color: 'var(--red)' }}>Error: {error}</div></div>
 
@@ -120,7 +132,7 @@ export default function Aportes() {
           <div className="metric-value" style={{ fontSize: 15 }}>
             {totEstr != null ? String(totEstr) : '—'}
           </div>
-          <div className="metric-label mt-16">C5: {totC5 != null ? fmtPctAuto(totC5) : '—'}</div>
+          <div className="metric-label mt-16">C5: {fmtPctAuto(totC5)}</div>
         </div>
       </div>
 
@@ -145,8 +157,13 @@ export default function Aportes() {
               </tr>
             )}
             {sorted.map((row, i) => {
-              const cant = num(row[colIdx]) ?? 0
-              const pct  = totTotal ? (cant / totTotal) * 100 : 0
+              const cant   = num(row[memesCol]) ?? 0
+              // Use pre-computed % from sheet if available, otherwise derive from total
+              const pctRaw = num(row[pctCol])
+              const pct    = pctRaw != null
+                ? (Math.abs(pctRaw) <= 1 ? pctRaw * 100 : pctRaw)
+                : (totTotal ? (cant / totTotal) * 100 : 0)
+
               return (
                 <tr key={i}>
                   <td className="mono" style={{ color: 'var(--muted)' }}>{i + 1}</td>

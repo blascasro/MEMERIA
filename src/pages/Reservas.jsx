@@ -5,8 +5,8 @@ import {
 } from 'recharts'
 import { useSheetData, num, fmt, fmtPct } from '../hooks/useSheetData'
 
-// ── RESERVAS matrix row indices ────────────────────────────────────────────────
-// row 0  = header  → col 0: label, col 1+: month names
+// ── RESERVAS matrix layout ────────────────────────────────────────────────────
+// row 0  = header  → col 0: row-label, col 1+: month names
 // row 1  = RESERVAS BRUTAS
 // row 2  = Star Wars
 // row 3  = PIPS
@@ -15,8 +15,7 @@ import { useSheetData, num, fmt, fmtPct } from '../hooks/useSheetData'
 // row 6  = Instagram
 // row 7  = Descargas
 // row 8  = Screenshots
-// Col 0 is always the row label; data starts at col 1.
-// Last populated column = latest month.
+// col 0 is the row label in every data row; data starts at col 1.
 
 const R_HDR  = 0
 const R_BRUT = 1
@@ -39,33 +38,44 @@ function Loading() {
   return <div className="state-box"><div className="spinner" /><span>Cargando reservas…</span></div>
 }
 
-// Find the last column index that has a non-null value in a given row
+// Last column index that has a non-null value in a row (data starts at col 1)
 function lastFilledCol(row) {
-  for (let j = row.length - 1; j >= 1; j--) {
+  for (let j = (row?.length ?? 0) - 1; j >= 1; j--) {
     if (row[j] != null) return j
   }
   return 1
 }
 
 export default function Reservas() {
+  // ── All hooks FIRST — before any conditional return ───────────────────────
   const { matrix, loading, error } = useSheetData('RESERVAS')
 
-  if (loading) return <div className="container"><Loading /></div>
+  // barData must be a useMemo at the top level — never after an early return
+  const barData = useMemo(() => {
+    const labels    = (matrix[R_HDR]  ?? []).slice(1).filter(Boolean).map(String)
+    const brutasRow = matrix[R_BRUT] ?? []
+    return labels.map((label, i) => ({
+      label,
+      bruto: num(brutasRow[i + 1])              ?? 0,
+      neto:  num((matrix[R_NET] ?? [])[i + 1])  ?? 0,
+    }))
+  }, [matrix])
+
+  // ── Early returns only after all hooks ────────────────────────────────────
+  if (loading) return <div className="container"><div className="state-box"><div className="spinner" /><span>Cargando reservas…</span></div></div>
   if (error)   return <div className="container"><div className="state-box" style={{ color: 'var(--red)' }}>Error: {error}</div></div>
 
-  // Month labels from header row (row 0), cols 1+
+  // ── Derived values (not hooks — computed only when data is ready) ─────────
   const headerRow   = matrix[R_HDR] ?? []
-  const monthLabels = headerRow.slice(1).map(v => (v != null ? String(v) : null)).filter(Boolean)
+  const monthLabels = headerRow.slice(1).filter(Boolean).map(String)
+  const brutasRow   = matrix[R_BRUT] ?? []
+  const latestCol   = lastFilledCol(brutasRow)
 
-  // Latest column = last col with data in the brutas row
-  const brutasRow = matrix[R_BRUT] ?? []
-  const latestCol = lastFilledCol(brutasRow)
-
-  const bruto     = num(brutasRow[latestCol])
-  const neto      = num((matrix[R_NET]  ?? [])[latestCol])
-  const instagram = num((matrix[R_INST] ?? [])[latestCol])
-  const descargas = num((matrix[R_DESC] ?? [])[latestCol])
-  const screenshots = num((matrix[R_SS] ?? [])[latestCol])
+  const bruto       = num(brutasRow[latestCol])
+  const neto        = num((matrix[R_NET]  ?? [])[latestCol])
+  const instagram   = num((matrix[R_INST] ?? [])[latestCol])
+  const descargas   = num((matrix[R_DESC] ?? [])[latestCol])
+  const screenshots = num((matrix[R_SS]   ?? [])[latestCol])
 
   const totalComp = (instagram ?? 0) + (descargas ?? 0) + (screenshots ?? 0)
 
@@ -75,16 +85,6 @@ export default function Reservas() {
     { name: 'Screenshots', value: screenshots ?? 0 },
   ].filter(d => d.value > 0)
 
-  // Historical bar: one entry per month
-  const barData = useMemo(() =>
-    monthLabels.map((label, i) => ({
-      label,
-      bruto: num(brutasRow[i + 1]) ?? 0,
-      neto:  num((matrix[R_NET] ?? [])[i + 1]) ?? 0,
-    })),
-    [matrix, monthLabels, brutasRow]
-  )
-
   return (
     <div className="container">
       <div className="page-header">
@@ -92,7 +92,7 @@ export default function Reservas() {
         <p className="page-subtitle">Stock de memes disponibles en la comunidad</p>
       </div>
 
-      {/* Metrics */}
+      {/* Summary metrics */}
       <div className="metric-grid mb-24">
         <div className="metric-card">
           <div className="metric-label">Stock Bruto</div>
@@ -126,7 +126,7 @@ export default function Reservas() {
       </div>
 
       <div className="grid-2">
-        {/* Donut chart */}
+        {/* Donut composition */}
         {donutData.length > 0 && (
           <div className="card">
             <div className="section-header">

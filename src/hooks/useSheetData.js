@@ -9,31 +9,33 @@ function parseGvizDate(v) {
   return new Date(p[0], p[1], p[2] ?? 1)
 }
 
-// Strip JSONP wrapper and parse the inner JSON
 function parseGvizResponse(text) {
-  const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*?)\);?\s*$/)
-  if (!match) throw new Error('Formato gviz inválido')
+  // Strip JSONP wrapper robustly via two replaces:
+  //   /*O_o*/ google.visualization.Query.setResponse({...});
+  const raw = text
+    .replace(/^.*?google\.visualization\.Query\.setResponse\(/, '')
+    .replace(/\);?\s*$/, '')
 
-  const data = JSON.parse(match[1])
-  if (data.status !== 'ok') {
-    throw new Error(data.errors?.[0]?.message || 'Error en la hoja')
+  const json = JSON.parse(raw)
+
+  if (json.status !== 'ok') {
+    throw new Error(json.errors?.[0]?.message || 'Error en la hoja')
   }
 
-  const { cols, rows } = data.table
+  const { cols, rows } = json.table
   const numCols = cols.length
 
-  // colHeaders: raw label strings from gviz (often "" when labels are missing)
+  // colHeaders: raw label strings (often "" when the sheet has no header row)
   const colHeaders = cols.map(c => c.label ?? '')
 
-  // matrix[i][j] = parsed value at row i, col j
-  const matrix = (rows || []).map(row =>
+  // matrix[i][j] = parsed value at table row i, column j
+  // Accessed as: rows[i].c[j]?.v
+  const matrix = (rows ?? []).map(row =>
     Array.from({ length: numCols }, (_, j) => {
       const cell = row?.c?.[j]
       if (!cell || cell.v == null) return null
-      const colType = cols[j]?.type
-      if (colType === 'date' || colType === 'datetime') {
-        return parseGvizDate(String(cell.v))
-      }
+      const t = cols[j]?.type
+      if (t === 'date' || t === 'datetime') return parseGvizDate(String(cell.v))
       return cell.v
     })
   )
@@ -81,14 +83,14 @@ export function useSheetData(sheetName) {
   return state
 }
 
-// ── Numeric coercion (returns null for invalid / missing) ──────────────────────
+// ── Numeric coercion — returns null for missing/NaN ───────────────────────────
 export function num(v) {
   if (v == null) return null
   const n = Number(v)
   return isNaN(n) ? null : n
 }
 
-// ── Median (ignores nulls/NaN) ─────────────────────────────────────────────────
+// ── Median (ignores nulls / NaN) ──────────────────────────────────────────────
 export function median(arr) {
   const s = arr.filter(v => v != null && !isNaN(v)).sort((a, b) => a - b)
   if (!s.length) return 0
@@ -96,7 +98,7 @@ export function median(arr) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
-// ── Formatters ─────────────────────────────────────────────────────────────────
+// ── Number formatters ─────────────────────────────────────────────────────────
 export function fmt(n, decimals = 0) {
   if (n == null || isNaN(n)) return '—'
   return Number(n).toLocaleString('es-AR', {
@@ -113,7 +115,7 @@ export function fmtPct(n, decimals = 1) {
   })}%`
 }
 
-// pct stored as fraction (0.15) or whole (15) → always render as whole
+// Handles pct stored as fraction (0.15 → "15,0%") or whole (15 → "15,0%")
 export function fmtPctAuto(n, decimals = 1) {
   if (n == null || isNaN(n)) return '—'
   const v = Math.abs(Number(n)) <= 1 ? Number(n) * 100 : Number(n)

@@ -2,23 +2,22 @@ import { useMemo } from 'react'
 import { useSheetData, num, fmt, median } from '../hooks/useSheetData'
 
 // ── ESCRUTINIOS matrix layout ─────────────────────────────────────────────────
-// row 0        = header  (col 1 = "Socios", col 2 = "Stock", col 3 = "Likes")
-// rows 1..n    = one member per row
-//   col 1 = nombre socio
-//   col 2 = stock declarado
-//   col 3 = likes declarados
-// col 0 is unused (empty / row number)
+// row 0    = empty / ignored (first spreadsheet row, not a header)
+// row 1    = header (col 1 = "Socios", col 2 = "Stock", col 3 = "Likes")
+// rows 2.. = data: col 1 = nombre, col 2 = stock declarado, col 3 = likes declarados
+// col 0 is unused in all rows.
 
 function Loading() {
   return <div className="state-box"><div className="spinner" /><span>Cargando escrutinios…</span></div>
 }
 
 export default function Escrutinios() {
+  // ── All hooks first ───────────────────────────────────────────────────────
   const { matrix, loading, error } = useSheetData('ESCRUTINIOS')
 
-  // Parse members starting at row 1 (skip header)
+  // Data rows start at index 2 (skip row 0 = empty, row 1 = header)
   const members = useMemo(() =>
-    (matrix.slice(1) ?? [])
+    (matrix.slice(2) ?? [])
       .filter(row => row[1] != null && String(row[1]).trim() !== '')
       .map(row => ({
         socio: String(row[1]),
@@ -41,19 +40,15 @@ export default function Escrutinios() {
   const avgStock = stockValues.length ? stockValues.reduce((s, v) => s + v, 0) / stockValues.length : 0
   const avgLikes = likesValues.length ? likesValues.reduce((s, v) => s + v, 0) / likesValues.length : 0
 
-  // Classify a member relative to the median
-  function classify(m) {
-    const hiStock = m.stock != null && m.stock > medStock * 2
-    const hiLikes = m.likes != null && m.likes > medLikes * 2
-    if (hiStock || hiLikes) return 'high'
-    const loStock = m.stock != null && m.stock < medStock * 0.4
-    const loLikes = m.likes != null && m.likes < medLikes * 0.4
-    if (loStock || loLikes) return 'low'
-    return 'normal'
-  }
-
+  // ── Early returns after all hooks ────────────────────────────────────────
   if (loading) return <div className="container"><Loading /></div>
   if (error)   return <div className="container"><div className="state-box" style={{ color: 'var(--red)' }}>Error: {error}</div></div>
+
+  function classify(m) {
+    if ((m.stock != null && m.stock > medStock * 2) || (m.likes != null && m.likes > medLikes * 2)) return 'high'
+    if ((m.stock != null && m.stock < medStock * 0.4) || (m.likes != null && m.likes < medLikes * 0.4)) return 'low'
+    return 'normal'
+  }
 
   return (
     <div className="container">
@@ -77,12 +72,12 @@ export default function Escrutinios() {
         <div className="metric-card">
           <div className="metric-label">Promedio stock</div>
           <div className="metric-value">{fmt(avgStock, 0)}</div>
-          <div className="metric-label mt-16">incluye outliers</div>
+          <div className="metric-label mt-16">con outliers</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Promedio likes</div>
           <div className="metric-value">{fmt(avgLikes, 0)}</div>
-          <div className="metric-label mt-16">incluye outliers</div>
+          <div className="metric-label mt-16">con outliers</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Socios relevados</div>
@@ -125,18 +120,21 @@ export default function Escrutinios() {
               </tr>
             )}
             {sorted.map((m, i) => {
-              const cls         = classify(m)
-              const trClass     = cls === 'high' ? 'row-red' : cls === 'low' ? 'row-orange' : ''
-              const stockRatio  = medStock > 0 && m.stock != null ? (m.stock / medStock) * 100 : null
-              const likesRatio  = medLikes > 0 && m.likes != null ? (m.likes / medLikes) * 100 : null
-              const stockHi     = m.stock != null && m.stock > medStock * 2
-              const stockLo     = m.stock != null && m.stock < medStock * 0.4
-              const likesHi     = m.likes != null && m.likes > medLikes * 2
-              const likesLo     = m.likes != null && m.likes < medLikes * 0.4
+              const cls        = classify(m)
+              const trClass    = cls === 'high' ? 'row-red' : cls === 'low' ? 'row-orange' : ''
+              const stockRatio = medStock > 0 && m.stock != null ? (m.stock / medStock) * 100 : null
+              const likesRatio = medLikes > 0 && m.likes != null ? (m.likes / medLikes) * 100 : null
+              const stockHi    = m.stock != null && m.stock > medStock * 2
+              const stockLo    = m.stock != null && m.stock < medStock * 0.4
+              const likesHi    = m.likes != null && m.likes > medLikes * 2
+              const likesLo    = m.likes != null && m.likes < medLikes * 0.4
 
-              function ratioColor(hi, lo) {
-                return hi ? 'var(--red)' : lo ? 'var(--orange)' : 'var(--muted)'
-              }
+              const ratioStyle = (hi, lo) => ({
+                fontSize: 11,
+                fontFamily: 'var(--mono)',
+                fontWeight: 600,
+                color: hi ? 'var(--red)' : lo ? 'var(--orange)' : 'var(--muted)',
+              })
 
               return (
                 <tr key={i} className={trClass}>
@@ -145,17 +143,13 @@ export default function Escrutinios() {
                   <td className="mono right">{m.stock != null ? fmt(m.stock) : '—'}</td>
                   <td className="right">
                     {stockRatio != null && (
-                      <span style={{ fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 600, color: ratioColor(stockHi, stockLo) }}>
-                        {Math.round(stockRatio)}%
-                      </span>
+                      <span style={ratioStyle(stockHi, stockLo)}>{Math.round(stockRatio)}%</span>
                     )}
                   </td>
                   <td className="mono right">{m.likes != null ? fmt(m.likes) : '—'}</td>
                   <td className="right">
                     {likesRatio != null && (
-                      <span style={{ fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 600, color: ratioColor(likesHi, likesLo) }}>
-                        {Math.round(likesRatio)}%
-                      </span>
+                      <span style={ratioStyle(likesHi, likesLo)}>{Math.round(likesRatio)}%</span>
                     )}
                   </td>
                   <td>
