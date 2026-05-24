@@ -11,20 +11,21 @@ import { useSheetData, num, fmt, fmtPct, fmtPctAuto, monthLabel } from '../hooks
 //   row 1  Stock          row 4  S/D diario
 //   row 2  Superavit      row 5  Fin
 //   row 3  Interanual     row 6  Dias asegurados
-//   col 0 = row label; data at col 1..N; colIdx = monthIdx + 1
+//   col 0 = row label; data at col 1..N; colIdx = stockMonthIdx + 1
 //
 // IPG copia — row 0: [label, mes1, mes2, …]   (month header, non-alternating)
+//   ⚠ independent month range from Stock copia (starts April 2025)
 //   row 1  TOTAL DE LIKES     row 4  Maximo
 //   row 2  PROMEDIO DE TANDA  row 5  Minimo
 //   row 3  dias registrados
-//   col 0 = row label; data at col 1..N; colIdx = monthIdx + 1
+//   col 0 = row label; data at col 1..N; ipgColIdx = ipgMonthIdx + 1
 //
-// Presupuestacion copia — alternating memes/% columns
-//   row 0: month labels at odd cols (1, 3, 5, …)
-//   Last 9 rows = totals (from end):
-//     -9 SOCIOS  -8 TOTAL  -7 Incumplidores  -6 Evasion fiscal
-//     -5 Evasion%  -4 IHH  -3 Estructura  -2 C3  -1 C5
-//   memesCol = 2*monthIdx + 1
+// Presupuestacion copia — non-alternating, one column per month
+//   row 0: col 0 = "" · cols 1..N = month labels (independent range from Stock)
+//   footer rows identified by col-0 name:
+//     SOCIOS · TOTAL · Incumplidores · Evasion fiscal · Evasion fiscal%
+//     Estructura · C5 · C3
+//   presupColIdx = presupMonthIdx + 1
 
 const TOOLTIP_STYLE = {
   background: 'var(--card)',
@@ -35,10 +36,10 @@ const TOOLTIP_STYLE = {
   boxShadow: 'var(--shadow-md)',
 }
 
-// Safe getter for last-N rows (fromEnd is negative, e.g. -1 = last row)
-function totRow(matrix, fromEnd) {
-  const idx = matrix.length + fromEnd
-  return idx >= 0 ? (matrix[idx] ?? []) : []
+// Find the first row whose col-0 value exactly matches `key` (trimmed).
+// Returns [] when not found so callers can safely do row[colIdx].
+function findRow(matrix, key) {
+  return matrix.find(row => String(row[0] ?? '').trim() === key) ?? []
 }
 
 function Loading() {
@@ -54,19 +55,33 @@ export default function Balances() {
   const ipg    = useSheetData('IPG copia')
   const presup = useSheetData('Presupuestacion copia')
 
-  // Month labels from Stock copia row 0, cols 1+
-  // monthLabel() handles both plain strings and Excel serial date numbers.
+  // Stock copia month labels — drives the selector and Stock column index
   const monthLabels = useMemo(
     () => (stock.matrix[0] ?? []).slice(1).map(monthLabel).filter(Boolean),
     [stock.matrix]
   )
 
-  const currentLabel = selectedLabel ?? monthLabels[monthLabels.length - 1] ?? null
-  const monthIdx     = currentLabel ? monthLabels.indexOf(currentLabel) : monthLabels.length - 1
+  // IPG copia has its own independent month range (starts April 2025)
+  const ipgMonthLabels = useMemo(
+    () => (ipg.matrix[0] ?? []).slice(1).map(monthLabel).filter(Boolean),
+    [ipg.matrix]
+  )
 
-  // Column selectors
-  const colIdx   = monthIdx + 1         // Stock copia & IPG copia (non-alternating; row 0 is header)
-  const memesCol = 2 * monthIdx + 1     // Presupuestacion copia (alternating)
+  // Presupuestacion copia — non-alternating, own month range
+  const presupMonthLabels = useMemo(
+    () => (presup.matrix[0] ?? []).slice(1).map(monthLabel).filter(Boolean),
+    [presup.matrix]
+  )
+
+  const currentLabel  = selectedLabel ?? monthLabels[monthLabels.length - 1] ?? null
+  const monthIdx      = currentLabel ? monthLabels.indexOf(currentLabel) : monthLabels.length - 1
+
+  // Each sheet gets its own column index via independent month lookup
+  const colIdx        = monthIdx + 1   // Stock copia
+  const ipgMonthIdx   = currentLabel ? ipgMonthLabels.indexOf(currentLabel)    : ipgMonthLabels.length - 1
+  const presupMonthIdx= currentLabel ? presupMonthLabels.indexOf(currentLabel) : presupMonthLabels.length - 1
+  const ipgColIdx     = ipgMonthIdx    >= 0 ? ipgMonthIdx + 1    : -1  // -1 = month not in IPG range
+  const presupColIdx  = presupMonthIdx >= 0 ? presupMonthIdx + 1 : -1  // -1 = month not in Presup range
 
   // Annual chart data — data rows start at index 1 (row 0 is the month header)
   const stockChartData = useMemo(
@@ -77,13 +92,14 @@ export default function Balances() {
     [monthLabels, stock.matrix]
   )
 
+  // IPG chart uses its own month labels — completely independent of Stock's range
   const ipgChartData = useMemo(
-    () => monthLabels.map((label, i) => ({
+    () => ipgMonthLabels.map((label, i) => ({
       label,
       likes:    num((ipg.matrix[1] ?? [])[i + 1]) ?? 0,
       promedio: num((ipg.matrix[2] ?? [])[i + 1]) ?? 0,
     })),
-    [monthLabels, ipg.matrix]
+    [ipgMonthLabels, ipg.matrix]
   )
 
   const loading = stock.loading || ipg.loading || presup.loading
@@ -103,21 +119,21 @@ export default function Balances() {
   const diasAseg   = num((stock.matrix[6] ?? [])[colIdx])           // row 6 = Dias asegurados
 
   // ── Monthly — Informe IPG ─────────────────────────────────────────────────
-  const totalLikes = num((ipg.matrix[1] ?? [])[colIdx])             // row 1 = TOTAL DE LIKES
-  const promTanda  = num((ipg.matrix[2] ?? [])[colIdx])             // row 2 = PROMEDIO DE TANDA
-  const maxLikes   = num((ipg.matrix[4] ?? [])[colIdx])             // row 4 = Maximo
-  const diasIPG    = num((ipg.matrix[3] ?? [])[colIdx])             // row 3 = dias registrados
+  const totalLikes = num((ipg.matrix[1] ?? [])[ipgColIdx])          // row 1 = TOTAL DE LIKES
+  const promTanda  = num((ipg.matrix[2] ?? [])[ipgColIdx])          // row 2 = PROMEDIO DE TANDA
+  const maxLikes   = num((ipg.matrix[4] ?? [])[ipgColIdx])          // row 4 = Maximo
+  const diasIPG    = num((ipg.matrix[3] ?? [])[ipgColIdx])          // row 3 = dias registrados
 
   // ── Monthly — Informe Presupuestario (from Presupuestacion copia) ─────────
   const m         = presup.matrix
-  const totSocios = num(totRow(m, -9)[memesCol])   // SOCIOS
-  const totTotal  = num(totRow(m, -8)[memesCol])   // TOTAL memes
-  const totIncump = num(totRow(m, -7)[memesCol])   // Incumplidores
-  const totEvFis  = num(totRow(m, -6)[memesCol])   // Evasion fiscal (memes)
-  const totEvPct  = num(totRow(m, -5)[memesCol])   // Evasion fiscal%
-  const totEstr   =     totRow(m, -3)[memesCol]    // Estructura (string)
-  const totC3     = num(totRow(m, -2)[memesCol])   // C3
-  const totC5     = num(totRow(m, -1)[memesCol])   // C5
+  const totSocios = num(findRow(m, 'SOCIOS')[presupColIdx])
+  const totTotal  = num(findRow(m, 'TOTAL')[presupColIdx])
+  const totIncump = num(findRow(m, 'Incumplidores')[presupColIdx])
+  const totEvFis  = num(findRow(m, 'Evasion fiscal')[presupColIdx])
+  const totEvPct  = num(findRow(m, 'Evasion fiscal%')[presupColIdx])
+  const totEstr   =     findRow(m, 'Estructura')[presupColIdx]
+  const totC3     = num(findRow(m, 'C3')[presupColIdx])
+  const totC5     = num(findRow(m, 'C5')[presupColIdx])
   const aporteSoc = totSocios && totTotal ? Math.round(totTotal / totSocios) : null
 
   return (
