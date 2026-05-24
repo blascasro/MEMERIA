@@ -10,12 +10,10 @@ function parseGvizDate(v) {
 }
 
 function parseGvizResponse(text) {
-  // Strip JSONP wrapper robustly via two replaces:
-  //   /*O_o*/ google.visualization.Query.setResponse({...});
-  const raw = text
-    .replace(/^.*?google\.visualization\.Query\.setResponse\(/, '')
-    .replace(/\);?\s*$/, '')
-
+  // Strip JSONP wrapper using indexOf/lastIndexOf — immune to regex edge cases.
+  // Format: /*O_o*/ google.visualization.Query.setResponse({...});
+  // We take everything between the first '(' and the last ')'.
+  const raw  = text.slice(text.indexOf('(') + 1, text.lastIndexOf(')'))
   const json = JSON.parse(raw)
 
   if (json.status !== 'ok') {
