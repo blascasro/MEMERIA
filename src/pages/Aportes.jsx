@@ -33,6 +33,50 @@ function findRow(matrix, key) {
   return matrix.find(row => String(row[0] ?? '').trim() === key) ?? []
 }
 
+// ── Month comparison helpers ───────────────────────────────────────────────
+// Converts "JULIO 2025" → 202507 so months can be compared with >= / <=.
+const _MES_NUM = Object.fromEntries(
+  ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO',
+   'JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE']
+  .map((m, i) => [m, i + 1])
+)
+function mesNum(label) {
+  if (!label) return 0
+  const [mes, anio] = String(label).trim().split(' ')
+  return (parseInt(anio, 10) || 0) * 100 + (_MES_NUM[mes] ?? 0)
+}
+
+/**
+ * Returns whether `nombre` should be visible in the given month label.
+ *
+ * Rules:
+ * - "Cartel Los analistas de Lirilí Larilá": only JULIO 2025 and AGOSTO 2025
+ * - Afro, Capilla, Jere: hidden in JULIO 2025 and AGOSTO 2025
+ * - Amado: hidden only in JULIO 2025
+ * - Bian: visible from AGOSTO 2025 onwards
+ * - Mari: visible from SEPTIEMBRE 2025 onwards
+ * - Everyone else: always visible
+ */
+function isSocioVisible(nombre, mes) {
+  const idx = mesNum(mes)
+  switch (nombre) {
+    case 'Cartel Los analistas de Lirilí Larilá':
+      return mes === 'JULIO 2025' || mes === 'AGOSTO 2025'
+    case 'Afro':
+    case 'Capilla':
+    case 'Jere':
+      return mes !== 'JULIO 2025' && mes !== 'AGOSTO 2025'
+    case 'Amado':
+      return mes !== 'JULIO 2025'
+    case 'Bian':
+      return idx >= mesNum('AGOSTO 2025')
+    case 'Mari':
+      return idx >= mesNum('SEPTIEMBRE 2025')
+    default:
+      return true
+  }
+}
+
 export default function Aportes() {
   // ── All hooks first ───────────────────────────────────────────────────────
   const { matrix, loading, error } = useSheetData('Presupuestacion copia')
@@ -87,6 +131,11 @@ export default function Aportes() {
   const totEvPct       = num(totals.evPct[colIdx])
   const totEstr        = totals.estr[colIdx]               // text value
   const totC5          = num(totals.c5[colIdx])
+
+  // Apply per-member visibility rules (cartelization periods, join dates, etc.)
+  const visibleRows = sorted.filter(row =>
+    isSocioVisible(String(row[0] ?? '').trim(), currentLabel ?? '')
+  )
 
   return (
     <div className="container">
@@ -158,14 +207,14 @@ export default function Aportes() {
             </tr>
           </thead>
           <tbody>
-            {sorted.length === 0 && (
+            {visibleRows.length === 0 && (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>
                   Sin datos para este mes
                 </td>
               </tr>
             )}
-            {sorted.map((row, i) => {
+            {visibleRows.map((row, i) => {
               const cant     = num(row[colIdx]) ?? 0
               // % real sobre el total del mes (base = SOCIOS row)
               const pct      = totSocios != null && totSocios > 0
