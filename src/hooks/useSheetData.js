@@ -119,3 +119,34 @@ export function fmtPctAuto(n, decimals = 1) {
   const v = Math.abs(Number(n)) <= 1 ? Number(n) * 100 : Number(n)
   return fmtPct(v, decimals)
 }
+
+// ── Month-label normaliser ────────────────────────────────────────────────────
+// gviz sometimes returns month-header cells as Excel serial date numbers
+// (e.g. 46756) instead of text. This helper converts either form to a
+// readable "ABRIL 2028"-style string.
+const MESES = [
+  'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO',
+  'JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE',
+]
+
+function serialToMes(n) {
+  // Excel epoch is 1900-01-01 but treats 1900 as a leap year (bug),
+  // so the correct offset to Unix epoch (1970-01-01) is 25569 days.
+  const date = new Date(Math.round((n - 25569) * 86400 * 1000))
+  return MESES[date.getUTCMonth()] + ' ' + date.getUTCFullYear()
+}
+
+/**
+ * Normalise a cell value from a month-header row into a display string.
+ * - number  → Excel serial date → "MES YYYY"
+ * - Date    → parsed by gviz date columns → "MES YYYY"
+ * - string  → used as-is (trimmed)
+ * - null/''  → null (filtered out by callers)
+ */
+export function monthLabel(v) {
+  if (v == null) return null
+  if (v instanceof Date) return MESES[v.getMonth()] + ' ' + v.getFullYear()
+  if (typeof v === 'number' && !isNaN(v)) return serialToMes(v)
+  const s = String(v).trim()
+  return s || null
+}

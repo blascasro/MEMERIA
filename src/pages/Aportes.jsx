@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useSheetData, num, fmt, fmtPct, fmtPctAuto } from '../hooks/useSheetData'
+import { useSheetData, num, fmt, fmtPct, fmtPctAuto, monthLabel } from '../hooks/useSheetData'
 
 // ── APORTES matrix layout ─────────────────────────────────────────────────────
 // row 0           = month header: col 0 = "", odd cols (1,3,5,…) = month labels,
@@ -32,11 +32,12 @@ export default function Aportes() {
   const [selectedLabel, setSelectedLabel] = useState(null)
 
   // Month labels from APORTES row 0: cols 1, 3, 5, … (odd cols = memes header)
+  // monthLabel() handles both plain strings and Excel serial date numbers.
   const monthLabels = useMemo(
     () => (aMatrix[0] ?? [])
       .slice(1)
       .filter((_, i) => i % 2 === 0)   // indices 0,2,4,… of the sliced array = cols 1,3,5,… of the row
-      .map(v => (v != null ? String(v) : null))
+      .map(monthLabel)
       .filter(Boolean),
     [aMatrix]
   )

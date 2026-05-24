@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Bar, Legend,
 } from 'recharts'
-import { useSheetData, num, fmt, fmtPct, fmtPctAuto } from '../hooks/useSheetData'
+import { useSheetData, num, fmt, fmtPct, fmtPctAuto, monthLabel } from '../hooks/useSheetData'
 
 // ── Sheet structures (all col/row indices are 0-based) ─────────────────────────
 //
@@ -54,9 +54,10 @@ export default function Balances() {
   const ipg    = useSheetData('IPG copia')
   const presup = useSheetData('Presupuestacion copia')
 
-  // Month labels from Stock copia row 0, cols 1+ (non-alternating)
+  // Month labels from Stock copia row 0, cols 1+
+  // monthLabel() handles both plain strings and Excel serial date numbers.
   const monthLabels = useMemo(
-    () => (stock.matrix[0] ?? []).slice(1).map(v => (v != null ? String(v) : null)).filter(Boolean),
+    () => (stock.matrix[0] ?? []).slice(1).map(monthLabel).filter(Boolean),
     [stock.matrix]
   )
 
@@ -165,15 +166,15 @@ export default function Balances() {
             {ipgChartData.some(d => d.likes > 0) ? (
               <div style={{ height: 260 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={ipgChartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                  <ComposedChart data={ipgChartData} margin={{ top: 4, right: 52, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                     <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                    <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} width={52} />
+                    <YAxis yAxisId="left"  orientation="left"  tick={{ fontSize: 11, fill: 'var(--muted)' }} width={52} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: 'var(--muted)' }} width={44} />
                     <Tooltip contentStyle={TOOLTIP_STYLE} />
                     <Legend iconSize={10} wrapperStyle={{ fontSize: 12, color: 'var(--text-dim)' }} />
-                    <Bar dataKey="likes" fill="var(--accent)" opacity={0.72} name="Total likes" radius={[2, 2, 0, 0]} />
-                    <Line
-                      type="monotone" dataKey="promedio" stroke="var(--orange)"
+                    <Bar    yAxisId="left"  dataKey="likes"    fill="var(--accent)" opacity={0.72} name="Total likes" radius={[2, 2, 0, 0]} />
+                    <Line   yAxisId="right" dataKey="promedio" type="monotone" stroke="var(--orange)"
                       strokeWidth={2} dot={false} strokeDasharray="5 3" name="Prom. tanda"
                     />
                   </ComposedChart>
