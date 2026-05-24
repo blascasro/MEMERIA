@@ -7,28 +7,24 @@ import { useSheetData, num, fmt, fmtPct, fmtPctAuto } from '../hooks/useSheetDat
 
 // ── Sheet structures (all col/row indices are 0-based) ─────────────────────────
 //
-// RESERVAS — row 0: [label, mes1, mes2, …]   (month header)
-//            rows 1+: data rows
+// Stock copia — row 0: [label, mes1, mes2, …]   (month header, non-alternating)
+//   row 1  Stock          row 4  S/D diario
+//   row 2  Superavit      row 5  Fin
+//   row 3  Interanual     row 6  Dias asegurados
+//   col 0 = row label; data at col 1..N; colIdx = monthIdx + 1
 //
-// Stock copia — col 0: metric label, col 1..N: monthly values (non-alternating)
-//   row 0  Stock
-//   row 1  Superavit/deficit
-//   row 2  Interanual
-//   row 3  S/D diario
-//   row 4  Fin
-//   row 5  Dias asegurados
+// IPG copia — row 0: [label, mes1, mes2, …]   (month header, non-alternating)
+//   row 1  TOTAL DE LIKES     row 4  Maximo
+//   row 2  PROMEDIO DE TANDA  row 5  Minimo
+//   row 3  dias registrados
+//   col 0 = row label; data at col 1..N; colIdx = monthIdx + 1
 //
-// IPG copia — col 0: metric label, col 1..N: monthly values (non-alternating)
-//   row 0  TOTAL DE LIKES
-//   row 1  PROMEDIO DE TANDA
-//   row 2  dias registrados
-//   row 3  Maximo
-//   row 4  Minimo
-//
-// APORTES — col 0: nombre socio, cols 1..N alternating memes / %
-//   For month n (0-based): memesCol = 2n+1, pctCol = 2n+2
-//   Last 9 rows = totals: SOCIOS, TOTAL, Incumplidores, Evasion fiscal,
-//                          Evasion fiscal%, IHH, Estructura, C3, C5
+// Presupuestacion copia — alternating memes/% columns
+//   row 0: month labels at odd cols (1, 3, 5, …)
+//   Last 9 rows = totals (from end):
+//     -9 SOCIOS  -8 TOTAL  -7 Incumplidores  -6 Evasion fiscal
+//     -5 Evasion%  -4 IHH  -3 Estructura  -2 C3  -1 C5
+//   memesCol = 2*monthIdx + 1
 
 const TOOLTIP_STYLE = {
   background: 'var(--card)',
@@ -39,7 +35,7 @@ const TOOLTIP_STYLE = {
   boxShadow: 'var(--shadow-md)',
 }
 
-// Safe getter for APORTES last-N rows (fromEnd is negative, e.g. -1 = last row)
+// Safe getter for last-N rows (fromEnd is negative, e.g. -1 = last row)
 function totRow(matrix, fromEnd) {
   const idx = matrix.length + fromEnd
   return idx >= 0 ? (matrix[idx] ?? []) : []
@@ -51,72 +47,68 @@ function Loading() {
 
 export default function Balances() {
   // ── All hooks first ───────────────────────────────────────────────────────
-  const [tab, setTab]                   = useState('anual')
+  const [tab, setTab]                    = useState('anual')
   const [selectedLabel, setSelectedLabel] = useState(null)
 
-  const reservas = useSheetData('RESERVAS')
-  const stock    = useSheetData('Stock copia')
-  const ipg      = useSheetData('IPG copia')
-  const aportes  = useSheetData('APORTES')
+  const stock  = useSheetData('Stock copia')
+  const ipg    = useSheetData('IPG copia')
+  const presup = useSheetData('Presupuestacion copia')
 
-  // Month labels from RESERVAS row 0, cols 1+
+  // Month labels from Stock copia row 0, cols 1+ (non-alternating)
   const monthLabels = useMemo(
-    () => (reservas.matrix[0] ?? []).slice(1).map(v => (v != null ? String(v) : null)).filter(Boolean),
-    [reservas.matrix]
+    () => (stock.matrix[0] ?? []).slice(1).map(v => (v != null ? String(v) : null)).filter(Boolean),
+    [stock.matrix]
   )
 
   const currentLabel = selectedLabel ?? monthLabels[monthLabels.length - 1] ?? null
   const monthIdx     = currentLabel ? monthLabels.indexOf(currentLabel) : monthLabels.length - 1
 
   // Column selectors
-  const colIdx   = monthIdx + 1        // Stock copia & IPG copia (non-alternating)
-  const memesCol = 2 * monthIdx + 1    // APORTES memes column for month n
+  const colIdx   = monthIdx + 1         // Stock copia & IPG copia (non-alternating; row 0 is header)
+  const memesCol = 2 * monthIdx + 1     // Presupuestacion copia (alternating)
 
-  // Annual chart data
-  const stockRow      = stock.matrix[0] ?? []
-  const totalLikesRow = ipg.matrix[0]   ?? []
-  const promTandaRow  = ipg.matrix[1]   ?? []
-
+  // Annual chart data — data rows start at index 1 (row 0 is the month header)
   const stockChartData = useMemo(
     () => monthLabels.map((label, i) => ({
       label,
-      stock: num(stockRow[i + 1]) ?? 0,
+      stock: num((stock.matrix[1] ?? [])[i + 1]) ?? 0,
     })),
-    [monthLabels, stock.matrix]  // depend on stock.matrix, not the derived stockRow
+    [monthLabels, stock.matrix]
   )
 
   const ipgChartData = useMemo(
     () => monthLabels.map((label, i) => ({
       label,
-      likes:    num(totalLikesRow[i + 1]) ?? 0,
-      promedio: num(promTandaRow[i + 1])  ?? 0,
+      likes:    num((ipg.matrix[1] ?? [])[i + 1]) ?? 0,
+      promedio: num((ipg.matrix[2] ?? [])[i + 1]) ?? 0,
     })),
     [monthLabels, ipg.matrix]
   )
 
-  const loading = reservas.loading || stock.loading || ipg.loading || aportes.loading
-  const error   = reservas.error   || stock.error   || ipg.error   || aportes.error
+  const loading = stock.loading || ipg.loading || presup.loading
+  const error   = stock.error   || ipg.error   || presup.error
 
   // ── Early returns after all hooks ────────────────────────────────────────
   if (loading) return <div className="container"><Loading /></div>
   if (error)   return <div className="container"><div className="state-box" style={{ color: 'var(--red)' }}>Error: {error}</div></div>
 
   // ── Monthly — Informe Stock ───────────────────────────────────────────────
+  const stockRow   = stock.matrix[1] ?? []                         // row 1 = Stock values
   const curStock   = num(stockRow[colIdx])
   const prevStock  = num(stockRow[colIdx - 1])
   const diffMes    = curStock != null && prevStock != null ? curStock - prevStock : null
-  const interanual = num((stock.matrix[2] ?? [])[colIdx])    // row 2 = Interanual
-  const sdDiario   = num((stock.matrix[3] ?? [])[colIdx])    // row 3 = S/D diario
-  const diasAseg   = num((stock.matrix[5] ?? [])[colIdx])    // row 5 = Dias asegurados
+  const interanual = num((stock.matrix[3] ?? [])[colIdx])           // row 3 = Interanual
+  const sdDiario   = num((stock.matrix[4] ?? [])[colIdx])           // row 4 = S/D diario
+  const diasAseg   = num((stock.matrix[6] ?? [])[colIdx])           // row 6 = Dias asegurados
 
   // ── Monthly — Informe IPG ─────────────────────────────────────────────────
-  const totalLikes = num(totalLikesRow[colIdx])
-  const promTanda  = num(promTandaRow[colIdx])
-  const maxLikes   = num((ipg.matrix[3] ?? [])[colIdx])      // row 3 = Maximo
-  const diasIPG    = num((ipg.matrix[2] ?? [])[colIdx])      // row 2 = dias registrados
+  const totalLikes = num((ipg.matrix[1] ?? [])[colIdx])             // row 1 = TOTAL DE LIKES
+  const promTanda  = num((ipg.matrix[2] ?? [])[colIdx])             // row 2 = PROMEDIO DE TANDA
+  const maxLikes   = num((ipg.matrix[4] ?? [])[colIdx])             // row 4 = Maximo
+  const diasIPG    = num((ipg.matrix[3] ?? [])[colIdx])             // row 3 = dias registrados
 
-  // ── Monthly — Informe Presupuestario (from APORTES, alternating cols) ─────
-  const m         = aportes.matrix
+  // ── Monthly — Informe Presupuestario (from Presupuestacion copia) ─────────
+  const m         = presup.matrix
   const totSocios = num(totRow(m, -9)[memesCol])   // SOCIOS
   const totTotal  = num(totRow(m, -8)[memesCol])   // TOTAL memes
   const totIncump = num(totRow(m, -7)[memesCol])   // Incumplidores
@@ -211,7 +203,7 @@ export default function Balances() {
           </div>
 
           {monthLabels.length === 0 && (
-            <div className="state-box">No se encontraron meses en RESERVAS fila 0.</div>
+            <div className="state-box">No se encontraron meses en Stock copia fila 0.</div>
           )}
 
           <div className="report-grid">

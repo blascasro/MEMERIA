@@ -2,19 +2,17 @@ import { useState, useMemo } from 'react'
 import { useSheetData, num, fmt, fmtPct, fmtPctAuto } from '../hooks/useSheetData'
 
 // ── APORTES matrix layout ─────────────────────────────────────────────────────
-// col 0           = nombre socio
-// cols 1..N       = months, ALTERNATING: odd cols = memes, even cols = %
-//   month n (0-based): memesCol = 2n+1 ,  pctCol = 2n+2
-//
-// last 9 rows = totals (position from end):
+// row 0           = month header: col 0 = "", odd cols (1,3,5,…) = month labels,
+//                  even cols (2,4,6,…) = empty (mirror of alternating memes/% structure)
+// rows 1..N-9     = member data: col 0 = nombre, odd cols = memes, even cols = %
+//                  For month n (0-based): memesCol = 2n+1, pctCol = 2n+2
+// last 9 rows     = totals (position from end):
 //   -9  SOCIOS          -6  Evasion fiscal
 //   -8  TOTAL           -5  Evasion fiscal%
 //   -7  Incumplidores   -4  IHH
 //                       -3  Estructura
 //                       -2  C3
 //                       -1  C5
-//
-// RESERVAS row 0 (col 1+) provides the month label strings.
 
 const N_TOTALS = 9
 
@@ -29,15 +27,18 @@ function safeRow(matrix, fromEnd) {
 
 export default function Aportes() {
   // ── All hooks first ───────────────────────────────────────────────────────
-  const { matrix: aMatrix, loading: aLoading, error: aError } = useSheetData('APORTES')
-  const { matrix: rMatrix, loading: rLoading, error: rError } = useSheetData('RESERVAS')
+  const { matrix: aMatrix, loading, error } = useSheetData('APORTES')
 
   const [selectedLabel, setSelectedLabel] = useState(null)
 
-  // Month labels from RESERVAS row 0, cols 1+
+  // Month labels from APORTES row 0: cols 1, 3, 5, … (odd cols = memes header)
   const monthLabels = useMemo(
-    () => (rMatrix[0] ?? []).slice(1).map(v => (v != null ? String(v) : null)).filter(Boolean),
-    [rMatrix]
+    () => (aMatrix[0] ?? [])
+      .slice(1)
+      .filter((_, i) => i % 2 === 0)   // indices 0,2,4,… of the sliced array = cols 1,3,5,… of the row
+      .map(v => (v != null ? String(v) : null))
+      .filter(Boolean),
+    [aMatrix]
   )
 
   const currentLabel = selectedLabel ?? monthLabels[monthLabels.length - 1] ?? null
@@ -47,10 +48,10 @@ export default function Aportes() {
   const memesCol = 2 * monthIdx + 1    // memes count
   const pctCol   = 2 * monthIdx + 2    // pre-computed % of total
 
-  // Member rows = all except last N_TOTALS rows
+  // Member rows = rows 1..length-N_TOTALS (skip row 0 = month header)
   const memberRows = useMemo(
     () => aMatrix
-      .slice(0, Math.max(0, aMatrix.length - N_TOTALS))
+      .slice(1, Math.max(1, aMatrix.length - N_TOTALS))
       .filter(row => row[0] != null && String(row[0]).trim() !== ''),
     [aMatrix]
   )
@@ -72,9 +73,6 @@ export default function Aportes() {
   const totEstr   =     safeRow(aMatrix, -3)[memesCol]    // Estructura (string)
   const totC5     = num(safeRow(aMatrix, -1)[memesCol])   // C5
   const aporteSoc = totSocios && totTotal ? Math.round(totTotal / totSocios) : null
-
-  const loading = aLoading || rLoading
-  const error   = aError   || rError
 
   // ── Early returns after all hooks ────────────────────────────────────────
   if (loading) return <div className="container"><Loading /></div>
