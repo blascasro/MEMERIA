@@ -2,34 +2,33 @@ import { useState, useMemo } from 'react'
 import { useSheetData, num, fmt, fmtPct, fmtPctAuto, monthLabel } from '../hooks/useSheetData'
 
 // ── "Presupuestacion copia" layout ────────────────────────────────────────────
-// row 0:     col 0 = "" · cols 1..N = month labels (one column per month, non-alternating)
+// row 0:     col 0 = "" · cols 1..N = month labels (one column per month)
 // rows 1..M: member rows — col 0 = name · cols 1..N = memes for that month
 // footer rows identified by col 0 value (exact string):
-//   SOCIOS · TOTAL · Incumplidores · Evasion fiscal · Evasion fiscal%
-//   Estructura · C5 · C3
+//   SOCIOS · TOTAL · Aporte ideal · Incumplidores · Evasion fiscal
+//   Evasion fiscal% · IHH · Estructura · C5 · C3
 //
-// Skipped rows (col 0 value):
-//   "Cartel Los analistas de Lirilí Larilá" · "A termino" · "Incompletos"
-//   "Aporte ideal" · "IHH" · "Laucha"
-//
-// % per member = member_memes / SOCIOS_row[colIdx] * 100
+// Member row filter — exclude if col 0:
+//   • contains "(baneado)"
+//   • exactly matches any name in NON_MEMBER_NAMES
 
-const IGNORED = new Set([
-  'Cartel Los analistas de Lirilí Larilá',
-  'A termino', 'Incompletos', 'Aporte ideal', 'IHH', 'Laucha',
+const NON_MEMBER_NAMES = new Set([
+  'A termino', 'Incompletos', 'SOCIOS', 'TOTAL', 'Aporte ideal',
+  'Incumplidores', 'Evasion fiscal', 'Evasion fiscal%', 'IHH', 'Estructura',
+  'C5', 'C3',
 ])
 
-const TOTAL_KEYS = new Set([
-  'SOCIOS', 'TOTAL', 'Incumplidores',
-  'Evasion fiscal', 'Evasion fiscal%', 'Estructura', 'C5', 'C3',
-])
+function isMember(row) {
+  const name = String(row[0] ?? '').trim()
+  return name && !name.includes('(baneado)') && !NON_MEMBER_NAMES.has(name)
+}
 
 function Loading() {
   return <div className="state-box"><div className="spinner" /><span>Cargando aportes…</span></div>
 }
 
 // Find the first row whose col-0 value exactly matches `key` (trimmed).
-// Returns [] when not found so callers can safely do row[colIdx].
+// Returns [] when not found so callers can safely index into it.
 function findRow(matrix, key) {
   return matrix.find(row => String(row[0] ?? '').trim() === key) ?? []
 }
@@ -39,34 +38,32 @@ export default function Aportes() {
   const { matrix, loading, error } = useSheetData('Presupuestacion copia')
   const [selectedLabel, setSelectedLabel] = useState(null)
 
-  // Month labels from row 0, cols 1..N (handles serial-date numbers and plain text)
+  // Month labels from row 0, cols 1..N
   const monthLabels = useMemo(
     () => (matrix[0] ?? []).slice(1).map(monthLabel).filter(Boolean),
     [matrix]
   )
 
-  // Member rows: skip header (row 0), ignored names, and total/footer names
+  // Valid member rows only
   const memberRows = useMemo(
-    () => matrix.slice(1).filter(row => {
-      const name = String(row[0] ?? '').trim()
-      return name && !IGNORED.has(name) && !TOTAL_KEYS.has(name)
-    }),
+    () => matrix.slice(1).filter(isMember),
     [matrix]
   )
 
-  // All footer rows in one memo — looked up by exact col-0 name
+  // All footer/total rows indexed by name — one memo for all lookups
   const totals = useMemo(() => ({
-    socios: findRow(matrix, 'SOCIOS'),
-    total:  findRow(matrix, 'TOTAL'),
-    incump: findRow(matrix, 'Incumplidores'),
-    evFis:  findRow(matrix, 'Evasion fiscal'),
-    evPct:  findRow(matrix, 'Evasion fiscal%'),
-    estr:   findRow(matrix, 'Estructura'),
-    c5:     findRow(matrix, 'C5'),
-    c3:     findRow(matrix, 'C3'),
+    socios:     findRow(matrix, 'SOCIOS'),
+    total:      findRow(matrix, 'TOTAL'),
+    aporteIdeal:findRow(matrix, 'Aporte ideal'),
+    incump:     findRow(matrix, 'Incumplidores'),
+    evFis:      findRow(matrix, 'Evasion fiscal'),
+    evPct:      findRow(matrix, 'Evasion fiscal%'),
+    estr:       findRow(matrix, 'Estructura'),
+    c5:         findRow(matrix, 'C5'),
+    c3:         findRow(matrix, 'C3'),
   }), [matrix])
 
-  // Selected month → column index (colIdx = -1 when no month available)
+  // Selected month → column index
   const currentLabel = selectedLabel ?? monthLabels[monthLabels.length - 1] ?? null
   const monthIdx     = currentLabel ? monthLabels.indexOf(currentLabel) : monthLabels.length - 1
   const colIdx       = monthIdx >= 0 ? monthIdx + 1 : -1
@@ -81,20 +78,15 @@ export default function Aportes() {
   if (loading) return <div className="container"><Loading /></div>
   if (error)   return <div className="container"><div className="state-box" style={{ color: 'var(--red)' }}>Error: {error}</div></div>
 
-  // ── Derived values (not hooks) ────────────────────────────────────────────
-  const maxCant   = num(sorted[0]?.[colIdx]) ?? 1
-  const totSocios = num(totals.socios[colIdx])   // societary memes total (base for % calculation)
-  const totTotal  = num(totals.total[colIdx])
-  const totIncump = num(totals.incump[colIdx])
-  const totEvFis  = num(totals.evFis[colIdx])
-  const totEvPct  = num(totals.evPct[colIdx])
-  const totEstr   = totals.estr[colIdx]
-  const totC5     = num(totals.c5[colIdx])
-  const totC3     = num(totals.c3[colIdx])
-  // Average contribution: total memes ÷ active member count
-  const aporteSoc = totTotal != null && memberRows.length > 0
-    ? Math.round(totTotal / memberRows.length)
-    : null
+  // ── Derived values ────────────────────────────────────────────────────────
+  const totSocios      = num(totals.socios[colIdx])
+  const totTotal       = num(totals.total[colIdx])
+  const aporteNecesario= num(totals.aporteIdeal[colIdx])   // "Aporte ideal" row
+  const totIncump      = num(totals.incump[colIdx])
+  const totEvFis       = num(totals.evFis[colIdx])
+  const totEvPct       = num(totals.evPct[colIdx])
+  const totEstr        = totals.estr[colIdx]               // text value
+  const totC5          = num(totals.c5[colIdx])
 
   return (
     <div className="container">
@@ -125,8 +117,8 @@ export default function Aportes() {
           <div className="metric-label mt-16">memes</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Aporte societario</div>
-          <div className="metric-value">{aporteSoc != null ? fmt(aporteSoc) : '—'}</div>
+          <div className="metric-label">Aporte necesario</div>
+          <div className="metric-value">{aporteNecesario != null ? fmt(aporteNecesario) : '—'}</div>
           <div className="metric-label mt-16">por socio</div>
         </div>
         <div className="metric-card">
@@ -144,7 +136,7 @@ export default function Aportes() {
           <div className="metric-label mt-16">{fmtPctAuto(totEvPct)}</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Estr. de mercado</div>
+          <div className="metric-label">Estr. de aportes</div>
           <div className="metric-value" style={{ fontSize: 15 }}>
             {totEstr != null ? String(totEstr) : '—'}
           </div>
@@ -160,6 +152,7 @@ export default function Aportes() {
               <th style={{ width: 44 }}>#</th>
               <th>Socio</th>
               <th className="right">Memes</th>
+              <th className="right">Faltante</th>
               <th className="right">%</th>
               <th style={{ minWidth: 130 }}>Participación</th>
             </tr>
@@ -167,31 +160,46 @@ export default function Aportes() {
           <tbody>
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>
+                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 40 }}>
                   Sin datos para este mes
                 </td>
               </tr>
             )}
             {sorted.map((row, i) => {
-              const cant = num(row[colIdx]) ?? 0
-              // % = memes del socio / SOCIOS base * 100
-              const pct  = totSocios != null && totSocios > 0
+              const cant     = num(row[colIdx]) ?? 0
+              // % real sobre el total del mes (base = SOCIOS row)
+              const pct      = totSocios != null && totSocios > 0
                 ? (cant / totSocios) * 100
                 : null
+              // Faltante = max(0, aporte necesario - memes aportados)
+              const faltante = aporteNecesario != null
+                ? Math.max(0, aporteNecesario - cant)
+                : null
+
+              // Row colour: red = 0 memes · yellow = faltante > 0 · none = OK
+              const trClass = cant === 0
+                ? 'row-red'
+                : (faltante != null && faltante > 0 ? 'row-yellow' : '')
 
               return (
-                <tr key={i}>
+                <tr key={i} className={trClass}>
                   <td className="mono" style={{ color: 'var(--muted)' }}>{i + 1}</td>
                   <td style={{ fontWeight: 500 }}>{String(row[0])}</td>
                   <td className="mono right">{fmt(cant)}</td>
+                  <td className="mono right" style={{
+                    color: faltante != null && faltante > 0 ? 'var(--yellow)' : 'var(--muted)',
+                  }}>
+                    {faltante != null ? fmt(faltante) : '—'}
+                  </td>
                   <td className="mono right" style={{ color: 'var(--text-dim)' }}>
                     {pct != null ? fmtPct(pct) : '—'}
                   </td>
                   <td>
+                    {/* Bar width = actual % of monthly total (not relative to max) */}
                     <div className="bar-wrap">
                       <div
                         className="bar-fill"
-                        style={{ width: `${(cant / Math.max(maxCant, 1)) * 100}%` }}
+                        style={{ width: pct != null ? `${Math.min(pct, 100)}%` : '0%' }}
                       />
                     </div>
                   </td>

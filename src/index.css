@@ -25,6 +25,8 @@
   --red-dim: rgba(201, 79, 79, 0.10);
   --orange: #C47830;
   --orange-dim: rgba(196, 120, 48, 0.10);
+  --yellow: #C49A0E;
+  --yellow-dim: rgba(196, 154, 14, 0.10);
   --green: #3DA06A;
   --green-dim: rgba(61, 160, 106, 0.10);
 
@@ -359,8 +361,10 @@ td.mono { font-family: var(--mono); }
 
 tr.row-red    td { background: var(--red-dim); }
 tr.row-orange td { background: var(--orange-dim); }
+tr.row-yellow td { background: var(--yellow-dim); }
 tr.row-red:hover    td { filter: brightness(0.95); }
 tr.row-orange:hover td { filter: brightness(0.95); }
+tr.row-yellow:hover td { filter: brightness(0.95); }
 
 /* ── Progress bar ───────────────────────────────── */
 .bar-wrap {
