@@ -36,10 +36,11 @@ const TOOLTIP_STYLE = {
   boxShadow: 'var(--shadow-md)',
 }
 
-// Find the first row whose col-0 value exactly matches `key` (trimmed).
+// Find the first row whose col-0 value matches `key` (case-insensitive, trimmed).
 // Returns [] when not found so callers can safely do row[colIdx].
 function findRow(matrix, key) {
-  return matrix.find(row => String(row[0] ?? '').trim() === key) ?? []
+  const k = key.trim().toLowerCase()
+  return matrix.find(row => String(row[0] ?? '').trim().toLowerCase() === k) ?? []
 }
 
 function Loading() {
@@ -131,7 +132,9 @@ export default function Balances() {
   const totIncump = num(findRow(m, 'Incumplidores')[presupColIdx])
   const totEvFis  = num(findRow(m, 'Evasion fiscal')[presupColIdx])
   const totEvPct  = num(findRow(m, 'Evasion fiscal%')[presupColIdx])
-  const totEstr   =     findRow(m, 'Estructura')[presupColIdx]
+  const _estrRow  = findRow(m, 'Estructura')
+  const totEstr   = _estrRow[presupColIdx]
+  console.log('[Balances] Estructura → row:', _estrRow, '| presupColIdx:', presupColIdx, '| value:', totEstr)
   const totC3     = num(findRow(m, 'C3')[presupColIdx])
   const totC5     = num(findRow(m, 'C5')[presupColIdx])
   const aporteSoc = totSocios && totTotal ? Math.round(totTotal / totSocios) : null
@@ -289,11 +292,11 @@ export default function Balances() {
                   <span className="report-row-value">{aporteSoc != null ? `${fmt(aporteSoc)} memes` : '—'}</span>
                 </div>
                 <div className="report-row">
-                  <span className="report-row-label">C5</span>
+                  <span className="report-row-label">TOP 5</span>
                   <span className="report-row-value">{fmtPctAuto(totC5)}</span>
                 </div>
                 <div className="report-row">
-                  <span className="report-row-label">C3</span>
+                  <span className="report-row-label">TOP 3</span>
                   <span className="report-row-value">{fmtPctAuto(totC3)}</span>
                 </div>
                 <div className="report-row">

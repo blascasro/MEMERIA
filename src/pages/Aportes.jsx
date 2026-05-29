@@ -27,10 +27,11 @@ function Loading() {
   return <div className="state-box"><div className="spinner" /><span>Cargando aportes…</span></div>
 }
 
-// Find the first row whose col-0 value exactly matches `key` (trimmed).
+// Find the first row whose col-0 value matches `key` (case-insensitive, trimmed).
 // Returns [] when not found so callers can safely index into it.
 function findRow(matrix, key) {
-  return matrix.find(row => String(row[0] ?? '').trim() === key) ?? []
+  const k = key.trim().toLowerCase()
+  return matrix.find(row => String(row[0] ?? '').trim().toLowerCase() === k) ?? []
 }
 
 // ── Month comparison helpers ───────────────────────────────────────────────
@@ -130,6 +131,7 @@ export default function Aportes() {
   const totEvFis       = num(totals.evFis[colIdx])
   const totEvPct       = num(totals.evPct[colIdx])
   const totEstr        = totals.estr[colIdx]               // text value
+  console.log('[Aportes] Estructura → row:', totals.estr, '| colIdx:', colIdx, '| value:', totEstr)
   const totC5          = num(totals.c5[colIdx])
 
   // Apply per-member visibility rules (cartelization periods, join dates, etc.)
@@ -189,7 +191,7 @@ export default function Aportes() {
           <div className="metric-value" style={{ fontSize: 15 }}>
             {totEstr != null ? String(totEstr) : '—'}
           </div>
-          <div className="metric-label mt-16">C5: {fmtPctAuto(totC5)}</div>
+          <div className="metric-label mt-16">TOP 5: {fmtPctAuto(totC5)}</div>
         </div>
       </div>
 
