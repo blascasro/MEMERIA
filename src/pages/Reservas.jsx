@@ -24,17 +24,10 @@ const R_INST = 6
 const R_DESC = 7
 const R_SS   = 8
 
-// ── Mini-tabla intermensual (filas fijas 9-13) ────────────────────────────────
-// row 9  = RESERVAS BRUTAS · row 10 = RESERVAS NETAS
-// row 11 = Instagram · row 12 = Descargas · row 13 = Screenshots
-// col 1 = mes anterior · col 2 = mes actual
-// Los nombres de los meses vienen de los headers de columna del gviz
-// (cols[cols.length-2].label y cols[cols.length-1].label), no de la matrix.
-const C_BRUT = 9
-const C_NET  = 10
-const C_INST = 11
-const C_DESC = 12
-const C_SS   = 13
+// ── Mini-tabla intermensual ────────────────────────────────────────────────────
+// header: fila donde col 0 === "#" → col 1 = mes anterior · col 2 = mes actual
+// header+1 = RESERVAS BRUTAS · header+2 = RESERVAS NETAS
+// header+3 = Instagram · header+4 = Descargas · header+5 = Screenshots
 
 const COLORS = ['#7F77DD', '#C47830', '#3DA06A']
 
@@ -60,7 +53,7 @@ function lastFilledCol(row) {
 
 export default function Reservas() {
   // ── All hooks FIRST — before any conditional return ───────────────────────
-  const { matrix, colHeaders, loading, error } = useSheetData('RESERVAS')
+  const { matrix, loading, error } = useSheetData('RESERVAS')
 
   // barData must be a useMemo at the top level — never after an early return
   const barData = useMemo(() => {
@@ -73,19 +66,22 @@ export default function Reservas() {
     }))
   }, [matrix])
 
-  // Comparativo intermensual (filas fijas 9-13, meses desde colHeaders)
+  // Comparativo intermensual (header = fila con col 0 === "#")
   const compareData = useMemo(() => {
-    const mesAnterior = colHeaders[colHeaders.length - 2] || ''
-    const mesActual   = colHeaders[colHeaders.length - 1] || ''
+    const compareHeader = matrix.find(row => row[0] === '#')
+    const compareStart  = matrix.findIndex(row => row[0] === '#')
+    const mesAnterior = compareHeader?.[1] || ''
+    const mesActual   = compareHeader?.[2] || ''
+    if (compareStart === -1) return { months: [mesAnterior, mesActual], rows: [] }
     const rows = [
-      { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[C_BRUT] ?? [] },
-      { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[C_NET]  ?? [] },
-      { label: 'Instagram',       cls: '',                   data: matrix[C_INST] ?? [] },
-      { label: 'Descargas',       cls: '',                   data: matrix[C_DESC] ?? [] },
-      { label: 'Screenshots',     cls: '',                   data: matrix[C_SS]   ?? [] },
+      { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[compareStart + 1] ?? [] },
+      { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[compareStart + 2] ?? [] },
+      { label: 'Instagram',       cls: '',                   data: matrix[compareStart + 3] ?? [] },
+      { label: 'Descargas',       cls: '',                   data: matrix[compareStart + 4] ?? [] },
+      { label: 'Screenshots',     cls: '',                   data: matrix[compareStart + 5] ?? [] },
     ]
     return { months: [mesAnterior, mesActual], rows }
-  }, [matrix, colHeaders])
+  }, [matrix])
 
   // ── Early returns only after all hooks ────────────────────────────────────
   if (loading) return <div className="container"><div className="state-box"><div className="spinner" /><span>Cargando reservas…</span></div></div>
