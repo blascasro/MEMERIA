@@ -3,7 +3,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
-import { useSheetData, num, fmt, fmtPct, monthLabel } from '../hooks/useSheetData'
+import { useSheetData, num, fmt, fmtPct } from '../hooks/useSheetData'
 
 // ── RESERVAS matrix layout ────────────────────────────────────────────────────
 // row 0  = header  → col 0: row-label, col 1+: month names
@@ -52,13 +52,33 @@ function lastFilledCol(row) {
   return 1
 }
 
+// Eje X del gráfico de evolución histórica: serial Excel → "MES YYYY" abreviado
+function serialToMes(val) {
+  if (typeof val === 'number') {
+    const MESES = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC']
+    const date = new Date(Math.round((val - 25569) * 86400 * 1000))
+    return MESES[date.getUTCMonth()] + ' ' + date.getUTCFullYear()
+  }
+  return val || ''
+}
+
+// Headers del comparativo intermensual: serial Excel → solo nombre del mes
+function serialToMesSolo(val) {
+  if (typeof val === 'number') {
+    const MESES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE']
+    const date = new Date(Math.round((val - 25569) * 86400 * 1000))
+    return MESES[date.getUTCMonth()]
+  }
+  return val || ''
+}
+
 export default function Reservas() {
   // ── All hooks FIRST — before any conditional return ───────────────────────
   const { matrix, loading, error } = useSheetData('RESERVAS')
 
   // barData must be a useMemo at the top level — never after an early return
   const barData = useMemo(() => {
-    const labels    = (matrix[R_HDR]  ?? []).slice(1).filter(Boolean).map(String)
+    const labels    = (matrix[R_HDR]  ?? []).slice(1).filter(Boolean).map(serialToMes)
     const brutasRow = matrix[R_BRUT] ?? []
     return labels.map((label, i) => ({
       label,
@@ -75,8 +95,8 @@ export default function Reservas() {
       if (brutasRow[j] !== null && brutasRow[j] !== undefined) lastCols.unshift(j)
     }
     const headerRow = matrix[0] ?? []
-    const mesAnterior = monthLabel(headerRow[lastCols[0]]) || ''
-    const mesActual   = monthLabel(headerRow[lastCols[1]]) || ''
+    const mesAnterior = serialToMesSolo(headerRow[lastCols[0]]) || ''
+    const mesActual   = serialToMesSolo(headerRow[lastCols[1]]) || ''
     const rows = [
       { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[10] ?? [] },
       { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[11] ?? [] },
