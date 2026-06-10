@@ -24,6 +24,17 @@ const R_INST = 6
 const R_DESC = 7
 const R_SS   = 8
 
+// ── Mini-tabla intermensual (rows 10-15) ──────────────────────────────────────
+// row 10 = header  → col 1, col 2: nombres de los dos meses
+// row 11 = RESERVAS BRUTAS · row 12 = RESERVAS NETAS
+// row 13 = Instagram · row 14 = Descargas · row 15 = Screenshots
+const C_HDR  = 10
+const C_BRUT = 11
+const C_NET  = 12
+const C_INST = 13
+const C_DESC = 14
+const C_SS   = 15
+
 const COLORS = ['#7F77DD', '#C47830', '#3DA06A']
 
 const TOOLTIP_STYLE = {
@@ -59,6 +70,20 @@ export default function Reservas() {
       bruto: num(brutasRow[i + 1])              ?? 0,
       neto:  num((matrix[R_NET] ?? [])[i + 1])  ?? 0,
     }))
+  }, [matrix])
+
+  // Comparativo intermensual (rows 10-15, cols 1-2)
+  const compareData = useMemo(() => {
+    const hdr = matrix[C_HDR] ?? []
+    const months = [String(hdr[1] ?? ''), String(hdr[2] ?? '')]
+    const rows = [
+      { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[C_BRUT] ?? [] },
+      { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[C_NET]  ?? [] },
+      { label: 'Instagram',       cls: '',                   data: matrix[C_INST] ?? [] },
+      { label: 'Descargas',       cls: '',                   data: matrix[C_DESC] ?? [] },
+      { label: 'Screenshots',     cls: '',                   data: matrix[C_SS]   ?? [] },
+    ]
+    return { months, rows }
   }, [matrix])
 
   // ── Early returns only after all hooks ────────────────────────────────────
@@ -125,20 +150,20 @@ export default function Reservas() {
         )}
       </div>
 
-      <div className="grid-2">
+      <div className="grid-2 mb-24">
         {/* Donut composition */}
-        {donutData.length > 0 && (
-          <div className="card">
-            <div className="section-header">
-              <span className="section-title">Composición por tipo</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-              <div style={{ width: 170, height: 170, flexShrink: 0 }}>
+        <div className="card">
+          <div className="section-header">
+            <span className="section-title">Composición por tipo</span>
+          </div>
+          {donutData.length > 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 160, height: 160, flexShrink: 0 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={donutData} cx="50%" cy="50%"
-                      innerRadius={52} outerRadius={74}
+                      innerRadius={48} outerRadius={70}
                       dataKey="value" paddingAngle={2}
                     >
                       {donutData.map((_, i) => (
@@ -159,31 +184,58 @@ export default function Reservas() {
                 ))}
               </ul>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="state-box" style={{ padding: 24 }}>Sin datos</div>
+          )}
+        </div>
 
-        {/* Historical bar */}
-        {barData.length > 0 && (
-          <div className="card">
-            <div className="section-header">
-              <span className="section-title">Evolución histórica</span>
-            </div>
-            <div style={{ height: 200 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={barData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--muted)' }} />
-                  <YAxis tick={{ fontSize: 10, fill: 'var(--muted)' }} width={44} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} />
-                  <Legend iconSize={10} wrapperStyle={{ fontSize: 12, color: 'var(--text-dim)' }} />
-                  <Bar dataKey="bruto" fill="var(--accent)" opacity={0.70} name="Bruto" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="neto"  fill="var(--green)"  opacity={0.70} name="Neto"  radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+        {/* Comparativo intermensual */}
+        <div className="card">
+          <div className="section-header">
+            <span className="section-title">Comparativo intermensual</span>
           </div>
-        )}
+          <table className="compare-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th className="right">{compareData.months[0] || '—'}</th>
+                <th className="right">{compareData.months[1] || '—'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compareData.rows.map(row => (
+                <tr key={row.label} className={row.cls}>
+                  <td>{row.label}</td>
+                  <td className="mono right">{fmt(num(row.data[1]) ?? 0)}</td>
+                  <td className="mono right">{fmt(num(row.data[2]) ?? 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      {/* Historical bar */}
+      {barData.length > 0 && (
+        <div className="card">
+          <div className="section-header">
+            <span className="section-title">Evolución histórica</span>
+          </div>
+          <div style={{ height: 200 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={barData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--muted)' }} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--muted)' }} width={44} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <Legend iconSize={10} wrapperStyle={{ fontSize: 12, color: 'var(--text-dim)' }} />
+                <Bar dataKey="bruto" fill="var(--accent)" opacity={0.70} name="Bruto" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="neto"  fill="var(--green)"  opacity={0.70} name="Neto"  radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
