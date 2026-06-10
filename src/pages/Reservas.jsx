@@ -3,7 +3,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
-import { useSheetData, num, fmt, fmtPct } from '../hooks/useSheetData'
+import { useSheetData, num, fmt, fmtPct, monthLabel } from '../hooks/useSheetData'
 
 // ── RESERVAS matrix layout ────────────────────────────────────────────────────
 // row 0  = header  → col 0: row-label, col 1+: month names
@@ -25,9 +25,10 @@ const R_DESC = 7
 const R_SS   = 8
 
 // ── Mini-tabla intermensual ────────────────────────────────────────────────────
-// header: fila donde col 0 === "#" → col 1 = mes anterior · col 2 = mes actual
-// header+1 = RESERVAS BRUTAS · header+2 = RESERVAS NETAS
-// header+3 = Instagram · header+4 = Descargas · header+5 = Screenshots
+// Los nombres de mes se leen de matrix[0] en las dos últimas columnas no-nulas
+// de matrix[1] (RESERVAS BRUTAS) — la fila "#" (matrix[9]) tiene cols 1/2 vacías.
+// matrix[10] = RESERVAS BRUTAS · matrix[11] = RESERVAS NETAS
+// matrix[12] = Instagram · matrix[13] = Descargas · matrix[14] = Screenshots
 
 const COLORS = ['#7F77DD', '#C47830', '#3DA06A']
 
@@ -66,19 +67,22 @@ export default function Reservas() {
     }))
   }, [matrix])
 
-  // Comparativo intermensual (header = fila con col 0 === "#")
+  // Comparativo intermensual (matrix[10..14]; meses = últimas 2 cols con dato en matrix[1])
   const compareData = useMemo(() => {
-    const compareHeader = matrix.find(row => row[0] === '#')
-    const compareStart  = matrix.findIndex(row => row[0] === '#')
-    const mesAnterior = compareHeader?.[1] || ''
-    const mesActual   = compareHeader?.[2] || ''
-    if (compareStart === -1) return { months: [mesAnterior, mesActual], rows: [] }
+    const brutasRow = matrix[1] ?? []
+    const lastCols = []
+    for (let j = brutasRow.length - 1; j >= 1 && lastCols.length < 2; j--) {
+      if (brutasRow[j] !== null && brutasRow[j] !== undefined) lastCols.unshift(j)
+    }
+    const headerRow = matrix[0] ?? []
+    const mesAnterior = monthLabel(headerRow[lastCols[0]]) || ''
+    const mesActual   = monthLabel(headerRow[lastCols[1]]) || ''
     const rows = [
-      { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[compareStart + 1] ?? [] },
-      { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[compareStart + 2] ?? [] },
-      { label: 'Instagram',       cls: '',                   data: matrix[compareStart + 3] ?? [] },
-      { label: 'Descargas',       cls: '',                   data: matrix[compareStart + 4] ?? [] },
-      { label: 'Screenshots',     cls: '',                   data: matrix[compareStart + 5] ?? [] },
+      { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[10] ?? [] },
+      { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[11] ?? [] },
+      { label: 'Instagram',       cls: '',                   data: matrix[12] ?? [] },
+      { label: 'Descargas',       cls: '',                   data: matrix[13] ?? [] },
+      { label: 'Screenshots',     cls: '',                   data: matrix[14] ?? [] },
     ]
     return { months: [mesAnterior, mesActual], rows }
   }, [matrix])
