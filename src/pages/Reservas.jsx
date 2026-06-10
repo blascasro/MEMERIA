@@ -24,12 +24,17 @@ const R_INST = 6
 const R_DESC = 7
 const R_SS   = 8
 
-// ── Mini-tabla intermensual (ubicación dinámica) ──────────────────────────────
-// Buscada a partir de la fila 9: header = primera fila con col 0 vacío y
-// col 1 con un nombre de mes (string, no numérico).
-// header   → col 1, col 2: nombres de los dos meses
-// header+1 = RESERVAS BRUTAS · header+2 = RESERVAS NETAS
-// header+3 = Instagram · header+4 = Descargas · header+5 = Screenshots
+// ── Mini-tabla intermensual (filas fijas 9-13) ────────────────────────────────
+// row 9  = RESERVAS BRUTAS · row 10 = RESERVAS NETAS
+// row 11 = Instagram · row 12 = Descargas · row 13 = Screenshots
+// col 1 = mes anterior · col 2 = mes actual
+// Los nombres de los meses vienen de los headers de columna del gviz
+// (cols[cols.length-2].label y cols[cols.length-1].label), no de la matrix.
+const C_BRUT = 9
+const C_NET  = 10
+const C_INST = 11
+const C_DESC = 12
+const C_SS   = 13
 
 const COLORS = ['#7F77DD', '#C47830', '#3DA06A']
 
@@ -53,29 +58,9 @@ function lastFilledCol(row) {
   return 1
 }
 
-// A "month name" cell is a non-empty string that isn't purely numeric
-function isMonthNameCell(v) {
-  if (v == null) return false
-  if (typeof v === 'number') return false
-  const s = String(v).trim()
-  return s !== '' && isNaN(Number(s))
-}
-
-// Find the header row of the second mini-table: starting from row 9,
-// the first row where col 0 is empty/null and col 1 looks like a month name.
-function findCompareHeaderIdx(matrix) {
-  for (let i = 9; i < matrix.length; i++) {
-    const row = matrix[i] ?? []
-    const c0  = row[0]
-    const c0Empty = c0 == null || String(c0).trim() === ''
-    if (c0Empty && isMonthNameCell(row[1])) return i
-  }
-  return -1
-}
-
 export default function Reservas() {
   // ── All hooks FIRST — before any conditional return ───────────────────────
-  const { matrix, loading, error } = useSheetData('RESERVAS')
+  const { matrix, colHeaders, loading, error } = useSheetData('RESERVAS')
 
   // barData must be a useMemo at the top level — never after an early return
   const barData = useMemo(() => {
@@ -88,21 +73,19 @@ export default function Reservas() {
     }))
   }, [matrix])
 
-  // Comparativo intermensual (header buscado dinámicamente)
+  // Comparativo intermensual (filas fijas 9-13, meses desde colHeaders)
   const compareData = useMemo(() => {
-    const hIdx = findCompareHeaderIdx(matrix)
-    if (hIdx === -1) return { months: ['', ''], rows: [] }
-    const hdr = matrix[hIdx] ?? []
-    const months = [String(hdr[1] ?? ''), String(hdr[2] ?? '')]
+    const mesAnterior = colHeaders[colHeaders.length - 2] || ''
+    const mesActual   = colHeaders[colHeaders.length - 1] || ''
     const rows = [
-      { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[hIdx + 1] ?? [] },
-      { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[hIdx + 2] ?? [] },
-      { label: 'Instagram',       cls: '',                   data: matrix[hIdx + 3] ?? [] },
-      { label: 'Descargas',       cls: '',                   data: matrix[hIdx + 4] ?? [] },
-      { label: 'Screenshots',     cls: '',                   data: matrix[hIdx + 5] ?? [] },
+      { label: 'RESERVAS BRUTAS', cls: 'compare-row-orange', data: matrix[C_BRUT] ?? [] },
+      { label: 'RESERVAS NETAS',  cls: 'compare-row-green',  data: matrix[C_NET]  ?? [] },
+      { label: 'Instagram',       cls: '',                   data: matrix[C_INST] ?? [] },
+      { label: 'Descargas',       cls: '',                   data: matrix[C_DESC] ?? [] },
+      { label: 'Screenshots',     cls: '',                   data: matrix[C_SS]   ?? [] },
     ]
-    return { months, rows }
-  }, [matrix])
+    return { months: [mesAnterior, mesActual], rows }
+  }, [matrix, colHeaders])
 
   // ── Early returns only after all hooks ────────────────────────────────────
   if (loading) return <div className="container"><div className="state-box"><div className="spinner" /><span>Cargando reservas…</span></div></div>
